@@ -67,13 +67,12 @@ class WebSocketManager {
 
     sendCommand(name, command, amountOfRetries = 1) {
     const that = this;
+    const socket = this.sockets["/websocket/commands"];
 
-    if (!this.sockets["/websocket/commands"]) {
-            // Bounded wait for the connection to open. This was an unbounded
-            // 100ms retry loop: while the socket was down it spammed tosu with
-            // getSettings requests, adding to the broadcast storm that slowed
-            // the server to tens of seconds per request. Give up after ~2s —
-            // callers have fallbacks (e.g. the presets HTTP pull).
+    // 已创建但仍在 CONNECTING 的 socket 直接 send 会抛 InvalidStateError
+    // （qqbot/无 tosu 环境下每个命令都会刷一条 [COMMAND_ERROR]）。
+    // 与“socket 不存在”走同一条有界重试路径，等 OPEN 后再发。
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
             if (amountOfRetries <= 20) {
             setTimeout(() => {
         that.sendCommand(name, command, amountOfRetries + 1);
@@ -84,7 +83,7 @@ class WebSocketManager {
 
     try {
             const payload = typeof command === "object" ? JSON.stringify(command) : command;
-            this.sockets["/websocket/commands"].send(`${name}:${payload}`);
+            socket.send(`${name}:${payload}`);
     } catch (error) {
             if (amountOfRetries <= 3) {
         setTimeout(() => {

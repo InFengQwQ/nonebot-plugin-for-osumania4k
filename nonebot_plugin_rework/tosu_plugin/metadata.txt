@@ -3,6 +3,6 @@ Name: ManiaMapAnalyser
 Author: Leo_Black
 CompatibleWith: tosu
 Resolution: 520x610
-Version: 2.0.0
+Version: beta_1.0.7
 authorLinks: https://github.com/LeoBlackMT/osumania_map_analyser
-Notes: Real-time osu!mania overlay for tosu that estimates difficulty, analyzes Pattern/MSD, and visualizes graph + pause data for 4K, 6K, and 7K maps.
+Notes: Fixed Density beta_1.0.7 — RC v13: 4K high-density single-tap rotation (roll) folding. 单键轮换 1234/1243/2134 在 20–40+ nps 增长区间内按 exp(-0.50·sRate·sShape·sRot) 逐事件折扣，使 1/32 @300+bpm 的 roll 难度向同音符数的对拍 E2b 收敛。Only three physical quantities are used (local single-tap nps, 4-lane rotation coverage, same-hand adjacent pair fraction at either phase); 1324 cross-hand rotations stay unchanged. 4K only; 6K/7K and LN are bit-identical to beta_1.0.6, 4K LN benchmark RMSE 1.3419 unchanged. Compared with beta_1.0.6 the 4K RC benchmark RMSE moves 0.4334 -> 0.4377 (roll folding trade-off); remaining 变化就是 6K/7K 段位标签与数值对齐（numeric value = dan index）。

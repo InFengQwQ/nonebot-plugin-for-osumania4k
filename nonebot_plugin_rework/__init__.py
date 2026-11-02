@@ -1,4 +1,4 @@
-"""nonebot-plugin-rework：osu!mania 4K Rework 谱面分析卡片。"""
+"""nonebot-plugin-rework：osu!mania 4K/6K/7K Rework 谱面分析卡片。"""
 
 from nonebot.plugin import PluginMetadata
 
@@ -8,7 +8,7 @@ __version__ = "1.0.0"
 
 __plugin_meta__ = PluginMetadata(
     name="Rework 谱面分析",
-    description="发送 /rework，生成 ManiaMapAnalyser 风格的 4K mania 谱面分析卡片。",
+    description="发送 /rework，生成 ManiaMapAnalyser 风格的 4K/6K/7K mania 谱面分析卡片。",
     usage=(
         "/rework <谱面ID>\n"
         "/rework bid<谱面ID> / b<ID>\n"

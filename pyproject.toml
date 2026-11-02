@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "nonebot-plugin-rework"
 version = "1.0.0"
-description = "osu!mania 4K Rework 谱面分析卡片 NoneBot2 插件"
+description = "osu!mania 4K/6K/7K Rework 谱面分析卡片 NoneBot2 插件"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

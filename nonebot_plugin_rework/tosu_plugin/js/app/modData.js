@@ -198,6 +198,8 @@ export function getModData(data, {
     }
 
     if (client === "lazer") {
+        // lazer 把 IN 与 HO 标为互斥（IncompatibleMods），这里保持 IN 优先；
+        // FD 侧仍接受 "IN+HO"（先 IN 后 HO）以兼容异常数据。
         if (modCodes.has("IN")) {
             cvtFlag = "IN";
         } else if (modCodes.has("HO")) {

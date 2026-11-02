@@ -227,11 +227,22 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
     }
 
     // 5. SunnyWindow（forceSunnyWindow）：calculateSunny + calculateLN（带 parsed + enableAnalyzeLN）。
+    //    SunnyWindow 的 calculateSunny 参数与 normalize/基准 Sunny 完全一致（speedRate/odFlag/
+    //    cvtFlag/withGraph/parsed），因此复用已算好的 Sunny 结果，避免重复一次重计算；
+    //    Daniel 等无同参数 Sunny 结果的路径仍自行计算（软失败语义不变）。
     let sunnyWindow = null;
     if (options.forceSunnyWindow) {
+        let precomputedSunnyResult = normalizationSunnyResult;
+        if (!precomputedSunnyResult && (actualEstimatorAlgorithm === "Sunny" || estimatorAlgorithm === "Companella")) {
+            precomputedSunnyResult = selectedRework;
+        }
         sunnyWindow = runSunnyWindowEstimatorFromText(
             rawText,
-            { ...options, enableAnalyzeLN: options.enableAnalyzeLN === true },
+            {
+                ...options,
+                enableAnalyzeLN: options.enableAnalyzeLN === true,
+                precomputedSunnyResult,
+            },
             parser,
         );
     }
@@ -266,11 +277,23 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
     let fixedDensityValue = Number.NaN;
     let fixedDensityLnValue = Number.NaN;
     let fixedDensityError = null;
+    let fixedDensityRcSequence = null;
+    let fixedDensityLnSequence = null;
+    let fixedDensityRcTicks = [];
+    let fixedDensityLnTicks = [];
+    let fixedDensityRcAnchor = null;
+    let fixedDensityLnAnchor = null;
     if (options.withFixedDensity) {
         try {
-            const fixedDensity = calculateFixedDensity(parser, options.speedRate ?? 1);
+            const fixedDensity = calculateFixedDensity(parser, options.speedRate ?? 1, { cvtFlag: options.cvtFlag ?? null });
             fixedDensityValue = fixedDensity.rcValue;
             fixedDensityLnValue = fixedDensity.lnValue;
+            fixedDensityRcSequence = fixedDensity.rcSequence || null;
+            fixedDensityLnSequence = fixedDensity.lnSequence || null;
+            fixedDensityRcTicks = fixedDensity.rcTicks || [];
+            fixedDensityLnTicks = fixedDensity.lnTicks || [];
+            fixedDensityRcAnchor = fixedDensity.rcAnchor || null;
+            fixedDensityLnAnchor = fixedDensity.lnAnchor || null;
         } catch (err) {
             fixedDensityError = String(err?.message || err);
         }
@@ -348,6 +371,12 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
         fixedDensityValue,
         fixedDensityLnValue,
         fixedDensityError,
+        fixedDensityRcSequence,
+        fixedDensityLnSequence,
+        fixedDensityRcTicks,
+        fixedDensityLnTicks,
+        fixedDensityRcAnchor,
+        fixedDensityLnAnchor,
         companellaEttResult,
         companellaEttError,
         errors: [],

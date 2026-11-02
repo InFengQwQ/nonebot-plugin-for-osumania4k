@@ -41,7 +41,7 @@ HELP_TEXT = (
     "/rework <osu! 链接>   支持官网谱面 / 谱包链接\n"
     "回复一条谱面文件并发送 /rework\n"
     "  支持 .osu / .osz / .mc / .mcz，以及内含它们的 .zip（可嵌套）\n"
-    "（仅支持 4K mania / Malody Key 4K 谱面）"
+    "（支持 4K/6K/7K mania / Malody Key 4K/6K/7K 谱面）"
 )
 
 _ID_RE = re.compile(r"^\d+$")

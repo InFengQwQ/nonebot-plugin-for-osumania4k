@@ -1,7 +1,7 @@
 # nonebot-plugin-rework
 
 一个 **NoneBot2 + OneBot v11** 插件：在 QQ 里发送 `/rework`，即可得到一张
-**ManiaMapAnalyser by Leo_Black（tosu 插件）风格**的 osu!mania 4K 谱面分析卡片。
+**ManiaMapAnalyser by Leo_Black（tosu 插件）风格**的 osu!mania 4K/6K/7K 谱面分析卡片。
 
 本项目由 `fixed-density` 仓库的 `qqbot` 分支改造而来，只保留 `/rework` 指令的功能，
 并把通信层从自建 OneBot 客户端迁移到 NoneBot2。仓库内自带渲染所需的
@@ -26,7 +26,7 @@ ManiaMapAnalyser 前端插件，无需另外准备 tosu 环境即可独立运行
 **Malody 支持**：`.mc` / `.mcz` 会先按 **模式 + 轨道数** 校验，再转换为一份临时
 `.osu`（物件时间戳保留浮点毫秒）后交给渲染器。
 
-**容错行为**：轨道数不是 4、或不是 osu!mania 谱面时，该张谱面的卡片会被替换为
+**容错行为**：轨道数不是 4/6/7、或不是 osu!mania 谱面时，该张谱面的卡片会被替换为
 错误提示图片；其余谱面照常输出。单张渲染失败也只会替换那一张，不会中断整包。
 
 ---
@@ -44,7 +44,7 @@ nonebot-plugin-rework/
    ├─ handler.py                # /rework 指令与服务生命周期
    ├─ service.py                # 指令解析、下载、渲染、发送
    ├─ config.py                 # 插件配置与运行时配置
-   ├─ beatmap.py                # .osu 解析与 4K mania 校验
+   ├─ beatmap.py                # .osu 解析与 4K/6K/7K mania 校验
    ├─ archive.py                # .osz/.mcz/.zip 递归扫描
    ├─ malody.py                 # .mc 解析与转换为 .osu
    ├─ osu_source.py             # 镜像下载 / 链接解析

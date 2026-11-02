@@ -1,4 +1,5 @@
 import { runAnalysisPipeline } from "../pipeline/runAnalysisPipeline.js";
+import { convertTaikoToMania4k, isTaikoBeatmap } from "../parser/taikoToMania4k.js";
 import { calculateReworkPp } from "../rework/reworkPerformance.js";
 import { applyCompanellaToMixedResult } from "../estimator/mixedEstimator.js";
 import { rcLabelToNumeric } from "../estimator/rcDifficultyFormat.js";
@@ -72,6 +73,7 @@ import {
     setGraphLoading,
     updateDiffTextVisibility,
 } from "./graph.js";
+import { hideAssignmentCharts, renderAssignmentCharts } from "./assignCharts.js";
 import {
     currentEstimatorAlgorithm,
     isAutoDisplayEnabledNow,
@@ -82,6 +84,11 @@ import { scheduleRecompute } from "./scheduler.js";
 import { detectVibro } from "./vibro.js";
 import { resultCache, resultCacheGeneration } from "./resultCache.js";
 import { trackTelemetryAnalyze } from "./telemetry.js";
+
+// 上一帧 Fixed Density 图表数据：重算失败时用它保住图表，避免切换 mod 时闪没。
+// 必须同时记住来源谱面身份：换图后重算失败时保留旧图会画错谱面，此时宁可隐藏。
+let lastFixedDensityChartPayload = null;
+let lastFixedDensityChartIdentity = "";
 
 function escapeHtml(value) {
     return String(value ?? "")
@@ -363,7 +370,10 @@ export async function fetchBeatmapFile(reason) {
     };
     // 缓存键加版本段：star 口径统一为 Sunny 原始 sr 后，旧快照（存的是 Azusa/Roxy 映射 star）必须失效。
     // star-v3：新增 Fixed Density v1 value 与覆盖标记，旧快照缺少该字段须失效重算。
-    const CACHE_KEY_STAR_UNIFIED_VERSION = "star-v3";
+    // star-v4-fdchart：FD 图表负载（rc/ln 序列、刻度、锚点）随快照存取；不带该负载的
+    // 旧快照在 FD 模式下视为 miss，否则缓存命中时无法重绘图（IN 开关回到旧 modSignature
+    // 时命中旧快照，表现为改图后再也画不出图表）。
+    const CACHE_KEY_STAR_UNIFIED_VERSION = "star-v4-fdchart";
     const cacheKey = `${CACHE_KEY_STAR_UNIFIED_VERSION}|${state.estimatorAlgorithm}|${state.lastBeatmapIdentity}|${state.modSignature}`;
     const isMetaDegraded = String(state.lastBeatmapIdentity || "").startsWith("meta:");
     let cached = null;
@@ -375,7 +385,9 @@ export async function fetchBeatmapFile(reason) {
             && snapshot.computed.ett === needComputed.ett
             && snapshot.computed.interlude === needComputed.interlude
             && snapshot.computed.fixedDensity === needComputed.fixedDensity
-            && snapshot.computed.pp === needComputed.pp) {
+            && snapshot.computed.pp === needComputed.pp
+            // FD 图表需要序列负载；旧/超大快照没有负载时必须重算，否则命中后图表无法重绘。
+            && (!needComputed.fixedDensity || !!snapshot.fixedDensityChart)) {
             cached = snapshot;
         }
     }
@@ -416,6 +428,11 @@ export async function fetchBeatmapFile(reason) {
             if (isStaleRequest()) return;
             if (!rawText || !rawText.trim()) {
                 throw new Error("Empty beatmap content.");
+            }
+            // 太鼓谱面：先按 taiko_to_mania4k 的算法转换为 mania 4K 文本，
+            // 之后统一走插件的键型识别与难度计算（连打/气球在转换中被忽略）。
+            if (isTaikoBeatmap(rawText)) {
+                rawText = convertTaikoToMania4k(rawText);
             }
             // parse-once：解析在 pipeline 内完成一次，parsedSummary 回传后（下方）才做 override。
         }
@@ -459,7 +476,19 @@ export async function fetchBeatmapFile(reason) {
                 };
                 const pipelineInput = { rawText, estimatorAlgorithm, options: pipelineOptions };
                 const wp = runInWorker(pipelineInput);
-                pipelineResult = wp ? await wp : await runAnalysisPipeline(pipelineInput);
+                if (wp) {
+                    try {
+                        pipelineResult = await wp;
+                    } catch (workerError) {
+                        // worker 崩溃/超时/结果不可克隆时不要让整次分析失败：
+                        // 回退主线程跑同一 pipeline（大谱面会阻塞主线程，但结果一致）。
+                        console.warn("[WORKER_FALLBACK]", workerError?.message || workerError);
+                        if (isStaleRequest()) return;
+                        pipelineResult = await runAnalysisPipeline(pipelineInput);
+                    }
+                } else {
+                    pipelineResult = await runAnalysisPipeline(pipelineInput);
+                }
                 parsedInfo = pipelineResult.parsedSummary;
                 applyContentBarOverride(parsedInfo.columnCount);
             } catch (error) {
@@ -525,6 +554,12 @@ export async function fetchBeatmapFile(reason) {
         let interludeStar = Number.NaN;
         let fixedDensityValue = Number.NaN;
         let fixedDensityLnValue = Number.NaN;
+        let fixedDensityRcSequence = null;
+        let fixedDensityLnSequence = null;
+        let fixedDensityRcTicks = [];
+        let fixedDensityLnTicks = [];
+        let fixedDensityRcAnchor = null;
+        let fixedDensityLnAnchor = null;
         let isVibroMap = false;
         let resolvedEstDiff = null;
         let resolvedNumericDifficulty = null;
@@ -677,19 +712,45 @@ export async function fetchBeatmapFile(reason) {
             if (cached) {
                 fixedDensityValue = cached.fixedDensityValue;
                 fixedDensityLnValue = cached.fixedDensityLnValue;
+                // 快照里带有图表负载时直接重绘（命中路径不 fetch rawText，无法再回退重算）。
+                const cachedFdChart = cached.fixedDensityChart;
+                if (cachedFdChart) {
+                    fixedDensityRcSequence = cachedFdChart.rc || null;
+                    fixedDensityLnSequence = cachedFdChart.ln || null;
+                    fixedDensityRcTicks = cachedFdChart.rcTicks || [];
+                    fixedDensityLnTicks = cachedFdChart.lnTicks || [];
+                    fixedDensityRcAnchor = cachedFdChart.rcAnchor || null;
+                    fixedDensityLnAnchor = cachedFdChart.lnAnchor || null;
+                }
             } else if (pipelineResult && Number.isFinite(pipelineResult.fixedDensityValue)) {
                 fixedDensityValue = pipelineResult.fixedDensityValue;
                 fixedDensityLnValue = pipelineResult.fixedDensityLnValue;
+                fixedDensityRcSequence = pipelineResult.fixedDensityRcSequence || null;
+                fixedDensityLnSequence = pipelineResult.fixedDensityLnSequence || null;
+                fixedDensityRcTicks = pipelineResult.fixedDensityRcTicks || [];
+                fixedDensityLnTicks = pipelineResult.fixedDensityLnTicks || [];
+                fixedDensityRcAnchor = pipelineResult.fixedDensityRcAnchor || null;
+                fixedDensityLnAnchor = pipelineResult.fixedDensityLnAnchor || null;
             } else if (!cached && rawText) {
                 // 回退：pipeline 估算失败 → 主线程直接计算（软失败，不阻断，展示时回退 SR）。
                 try {
-                    const fd = calculateFixedDensity(rawText, state.speedRate);
+                    const fd = calculateFixedDensity(rawText, state.speedRate, { cvtFlag: state.cvtFlag });
                     fixedDensityValue = fd.rcValue;
                     fixedDensityLnValue = fd.lnValue;
+                    fixedDensityRcSequence = fd.rcSequence || null;
+                    fixedDensityLnSequence = fd.lnSequence || null;
+                    fixedDensityRcTicks = fd.rcTicks || [];
+                    fixedDensityLnTicks = fd.lnTicks || [];
+                    fixedDensityRcAnchor = fd.rcAnchor || null;
+                    fixedDensityLnAnchor = fd.lnAnchor || null;
                     if (isStaleRequest()) return;
                 } catch (_) {
                     fixedDensityValue = Number.NaN;
                     fixedDensityLnValue = Number.NaN;
+                    fixedDensityRcSequence = null;
+                    fixedDensityLnSequence = null;
+                    fixedDensityRcAnchor = null;
+                    fixedDensityLnAnchor = null;
                 }
             }
         }
@@ -905,6 +966,21 @@ export async function fetchBeatmapFile(reason) {
                 // structuredClone 无法拷贝（resultCache 契约要求 JSON-safe），
                 // 快照只存渲染所需的普通字段。
                 const jsonSafe = (value) => (value == null ? value : JSON.parse(JSON.stringify(value)));
+                // FD 图表负载：命中路径不 fetch rawText，图表只能靠快照里的序列重绘。
+                // 超大谱面的序列可达 600KB+，超过点数上限时不存负载（上面命中守卫会当作 miss）。
+                const cachedFdPoints = (fixedDensityRcSequence?.times?.length || 0)
+                    + (fixedDensityLnSequence?.times?.length || 0);
+                const cachedFdChart = fixedDensityRcSequence && cachedFdPoints > 0
+                    && cachedFdPoints <= 20000
+                    ? {
+                        rc: fixedDensityRcSequence,
+                        ln: fixedDensityLnSequence,
+                        rcTicks: fixedDensityRcTicks,
+                        lnTicks: fixedDensityLnTicks,
+                        rcAnchor: fixedDensityRcAnchor,
+                        lnAnchor: fixedDensityLnAnchor,
+                    }
+                    : null;
                 resultCache.put(cacheKey, {
                     rework: {
                         star: rework.star,
@@ -923,6 +999,7 @@ export async function fetchBeatmapFile(reason) {
                     interludeStar,
                     fixedDensityValue,
                     fixedDensityLnValue,
+                    fixedDensityChart: cachedFdChart,
                     isVibroMap,
                     sixKConst,
                     ppMetrics: pipelineResult.ppMetrics || null,
@@ -1047,14 +1124,14 @@ export async function fetchBeatmapFile(reason) {
             }
         } else if (state.srText === "Fixed Density v1") {
             if (Number.isFinite(fixedDensityValue)) {
-                showFixedDensityValue(fixedDensityValue);
+                showFixedDensityValue(fixedDensityValue, parsedInfo?.columnCount ?? rework?.columnCount);
                 leftCapsuleUnit = "RC";
             } else if (rework) {
                 showNumericStarValue(rework.star);
                 leftCapsuleUnit = "SR";
             }
             if (Number.isFinite(fixedDensityLnValue)) {
-                showFixedDensityLnValue(fixedDensityLnValue);
+                showFixedDensityLnValue(fixedDensityLnValue, parsedInfo?.columnCount ?? rework?.columnCount);
             }
         } else if (state.srText === "ReworkPP") {
             let ppVal = getLatestPpValue();   // from livePp.js (max PP when idle, live PP in play)
@@ -1084,6 +1161,55 @@ export async function fetchBeatmapFile(reason) {
             if (state.srText === "ReworkSR") {
                 leftCapsuleUnit = "SR";
             }
+        }
+
+        // Fixed Density v1：两张「难度-进度」图（RC / LN 逐物件赋值），仅在该算法下显示。
+        // 切换 IN/HO 等 mod 会触发重算；若重算失败（NaN/序列缺失）保留上一帧图表而不是隐藏，
+        // 避免 tosu 面板在切换 mod 的瞬间「图表消失」。
+        if (state.srText === "Fixed Density v1" && Number.isFinite(fixedDensityValue)) {
+            if (!fixedDensityRcSequence && rawText) {
+                try {
+                    const fd = calculateFixedDensity(rawText, state.speedRate, { cvtFlag: state.cvtFlag });
+                    fixedDensityRcSequence = fd.rcSequence || null;
+                    fixedDensityLnSequence = fd.lnSequence || null;
+                    fixedDensityRcTicks = fd.rcTicks || [];
+                    fixedDensityLnTicks = fd.lnTicks || [];
+                    fixedDensityRcAnchor = fd.rcAnchor || null;
+                    fixedDensityLnAnchor = fd.lnAnchor || null;
+                } catch (_) {
+                    fixedDensityRcSequence = null;
+                    fixedDensityLnSequence = null;
+                    fixedDensityRcAnchor = null;
+                    fixedDensityLnAnchor = null;
+                }
+            }
+            if (fixedDensityRcSequence) {
+                const payload = {
+                    keyCount: parsedInfo?.columnCount ?? rework?.columnCount ?? 4,
+                    rc: fixedDensityRcSequence,
+                    ln: fixedDensityLnSequence,
+                    rcTicks: fixedDensityRcTicks,
+                    lnTicks: fixedDensityLnTicks,
+                    rcAnchor: fixedDensityRcAnchor,
+                    lnAnchor: fixedDensityLnAnchor,
+                };
+                lastFixedDensityChartPayload = payload;
+                lastFixedDensityChartIdentity = state.lastBeatmapIdentity || "";
+                try {
+                    renderAssignmentCharts(payload);
+                } catch (error) {
+                    // 渲染异常不隐藏图表，也不阻断后续胶囊/图例更新。
+                    console.warn(`[FD_CHARTS] render failed: ${error?.message || error}`);
+                }
+            }
+        } else if (state.srText === "Fixed Density v1"
+            && lastFixedDensityChartPayload
+            && lastFixedDensityChartIdentity === (state.lastBeatmapIdentity || "")) {
+            // FD 仍激活但本次结果不可用（重算失败/NaN）：同一谱面内保留上一帧图表。
+        } else {
+            lastFixedDensityChartPayload = null;
+            lastFixedDensityChartIdentity = "";
+            hideAssignmentCharts();
         }
 
         setLeftCapsuleUnitBadge(leftCapsuleUnit);

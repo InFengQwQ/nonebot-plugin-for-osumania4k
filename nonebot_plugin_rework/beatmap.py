@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass
 
 MANIA_MODE = 3
-SUPPORTED_KEYS = 4
+SUPPORTED_KEYS = (4, 6, 7)
 
 _SECTION_RE = re.compile(r"^\[(.+)\]$")
 
@@ -50,7 +50,7 @@ def _parse_float(value: str, default: float) -> float:
 
 
 def parse_beatmap(text: str) -> BeatmapInfo:
-    """解析谱面文本并校验是否为 4K mania。
+    """解析谱面文本并校验是否为 4K/6K/7K mania。
 
     error 非空时表示该谱面不可分析，其内容即为给用户看的错误提示。
     """
@@ -118,9 +118,9 @@ def parse_beatmap(text: str) -> BeatmapInfo:
         info.error = "该谱面缺少 CircleSize 字段，无法判断轨道数。"
         return info
 
-    if info.column_count != SUPPORTED_KEYS:
+    if info.column_count not in SUPPORTED_KEYS:
         info.error = (
-            f"该谱面为 {info.column_count}K，本工具仅支持 4K mania 谱面。"
+            f"该谱面为 {info.column_count}K，本工具仅支持 4K/6K/7K mania 谱面。"
         )
         return info
 
