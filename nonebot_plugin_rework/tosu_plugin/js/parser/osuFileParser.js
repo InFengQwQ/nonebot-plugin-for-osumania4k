@@ -186,18 +186,25 @@ export class OsuFileParser {
         // where 512 is not divisible by key count.
         column = xToColumn(x, this.columnCount);
             }
-            this.columns.push(column);
 
-            const noteStart = Number.parseInt(params[2], 10);
+            // 时间戳保留浮点：lazer/编辑器写出的 .osu 可能存在小数毫秒，
+            // 取整会把 1ms 内的不同时刻折成同一时间戳（叠键误判）。
+            const noteStart = Number.parseFloat(params[2]);
             const noteType = Number.parseInt(params[3], 10);
-            this.noteStarts.push(noteStart);
-            this.noteTypes.push(noteType);
+            if (!Number.isFinite(noteStart)) return;
 
             let noteEnd = noteStart;
             if ((noteType & 128) !== 0 && params.length >= 6) {
         const lastParamChunk = params[5].split(":");
-        noteEnd = Number.parseInt(lastParamChunk[0], 10);
+        noteEnd = Number.parseFloat(lastParamChunk[0]);
+        // 与 osu! 一致：尾时间无效的 LN（-2147483648 / NaN / 早于头 / 负值）整个物件被忽略。
+        // 这类错误物件在部分谱面里成片出现，若计入会造成密度与难度虚高。
+        if (!Number.isFinite(noteEnd) || noteEnd <= noteStart || noteEnd < 0) return;
             }
+
+            this.columns.push(column);
+            this.noteStarts.push(noteStart);
+            this.noteTypes.push(noteType);
             this.noteEnds.push(noteEnd);
     } catch {
             this.status = "Fail";

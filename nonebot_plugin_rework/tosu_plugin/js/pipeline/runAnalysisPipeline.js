@@ -283,6 +283,7 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
     let fixedDensityLnTicks = [];
     let fixedDensityRcAnchor = null;
     let fixedDensityLnAnchor = null;
+    let fixedDensityOverlaps = null;
     if (options.withFixedDensity) {
         try {
             const fixedDensity = calculateFixedDensity(parser, options.speedRate ?? 1, { cvtFlag: options.cvtFlag ?? null });
@@ -294,6 +295,7 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
             fixedDensityLnTicks = fixedDensity.lnTicks || [];
             fixedDensityRcAnchor = fixedDensity.rcAnchor || null;
             fixedDensityLnAnchor = fixedDensity.lnAnchor || null;
+            fixedDensityOverlaps = fixedDensity.overlaps || null;
         } catch (err) {
             fixedDensityError = String(err?.message || err);
         }
@@ -376,6 +378,7 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
         fixedDensityRcTicks,
         fixedDensityLnTicks,
         fixedDensityRcAnchor,
+        fixedDensityOverlaps,
         fixedDensityLnAnchor,
         companellaEttResult,
         companellaEttError,

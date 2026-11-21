@@ -1,0 +1,115 @@
+{
+ "rc_v10": {
+  "endurance_layer_v23": {
+   "position": "after row multipliers, before quantile",
+   "formula": "sim=exp(-(ln(v/ema)/0.35)^2); E=E*exp(-(1-sim)*3-max(0,dt-200)/600)+sim*min(dt,600)/30000; gPred+=beta*ln(1+q75(E))",
+   "beta": {
+    "4": 0.6,
+    "6": 0.4,
+    "7": 0.4
+   },
+   "ema_ms": 1000,
+   "sigma": 0.35,
+   "reset_k": 3.0,
+   "tau_ms": 600,
+   "gap_ms": 200,
+   "dt_cap_ms": 600,
+   "t0_ms": 30000,
+   "benchmark_after": {
+    "4K_rc": 0.4333,
+    "6K_rc": 0.3453,
+    "7K_rc": 0.6463,
+    "4K_ln": null
+   },
+   "synth": {
+    "uniform_10rps": 0.82,
+    "fluct_10_6": 0.59,
+    "uniform_8rps": -0.69
+   },
+   "user_charts": {
+    "summer_4k": 11.56,
+    "hollow_6k": 6.12,
+    "6k_a": 5.42,
+    "6k_b": 5.09
+   }
+  },
+  "endurance_layer_v24": {
+   "position": "after row multipliers, before quantile",
+   "basis": "lane nps (2s window, max over lanes), stability = 3s EMA, sim = exp(-(dx/1.0 nps)^2)",
+   "formula": "E=E*exp(-(1-sim)*3-max(0,dt-200)/600)+sim*min(dt,600)/30000; gPred+=beta*ln(1+q75(E))",
+   "beta": {
+    "4": 0.35,
+    "6": 0.3,
+    "7": 0.5
+   },
+   "benchmark_after": {
+    "4K_rc": 0.4233,
+    "6K_rc": 0.3428,
+    "7K_rc": 0.6477
+   },
+   "resid_corr": {
+    "4K": 0.044,
+    "6K": -0.003,
+    "7K": -0.099
+   },
+   "synth": {
+    "uniform_10rps": 1.21,
+    "fluct_10_6": 0.59,
+    "uniform_8rps": 0.0,
+    "pause": 0.61
+   },
+   "user_charts": {
+    "summer_4k": 11.34,
+    "hollow_6k": 5.96,
+    "6k_a": 5.43,
+    "6k_b": 5.1
+   }
+  },
+  "perf_optimization_v25": {
+   "date": "2026-11-15",
+   "changes": [
+    "sShieldHead binary search",
+    "sRelease nearest-neighbor + active sweep",
+    "endurance lane-nps sliding window"
+   ],
+   "hot_chart_ms": {
+    "before": 482,
+    "after": 110
+   },
+   "suite_14_ms": {
+    "before": 1436,
+    "after": 831
+   },
+   "identical_charts": 1075
+  },
+  "chart_overlap_display_v26": {
+   "date": "2026-11-16",
+   "axis_expand": "tick lines drawn to top of plot (no TICKS_ABOVE cap); yMax from curve p99.5/anchor",
+   "draw_order": "anchor below, tick lines above",
+   "near_overlap": {
+    "rc": "gap<5ms and gap<min(surrounding gaps)/40",
+    "ln": "seam<5ms and seam<min(surrounding head gaps)/80",
+    "missing_surround": "0ms"
+   },
+   "position_list": {
+    "order": "red first then near; within: RC then LN; each time-sorted",
+    "max": 8,
+    "format": "[beat:grid/divisor] mm:ss.xxx lane n [ln]",
+    "beat_offset": "+1 (malody editor)"
+   },
+   "deployed_layout": 70
+  },
+  "invalid_ln_ignored_v27": {
+   "date": "2026-11-19",
+   "rule": "skip LN objects whose end is non-finite, <= start, or < 0 (osu! behavior)",
+   "files": [
+    "js/parser/osuFileParser.js",
+    "js/parser/patternOsuParser.js",
+    "js/app/rcintervals.js"
+   ],
+   "example": "Camellia - Hello (BPM) 2023 [NSV]: 612 invalid LNs (tail -2147483648) at 144.2-157.8s; RC 32.37->12.43, LN 33.16->11.41",
+   "regression": "1717 charts identical",
+   "deployed_layout": 71
+  }
+ }
+}

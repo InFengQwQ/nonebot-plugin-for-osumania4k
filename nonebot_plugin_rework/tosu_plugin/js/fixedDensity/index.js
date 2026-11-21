@@ -74,31 +74,31 @@ const WEAK_GATE_IMB_S = 0.0825;
 
 const LOG_BASE_DENOM = Math.log(EXTRA_LOG_BASE);
 const HALF_BETA = 0.5 * SOFT_BETA;
-const HAND_NORM_P = 2.0; // 6K 手内合并层：12/23 两条配对序列的 2-范数合并阶数
-const HAND_NORM_SCALE = 1.0; // 6K 手内合并层幅值系数（全量调参项，初值 = 1）
+const HAND_NORM_P = 2.0; // 旧（1.0.7-）手内合并层：band 的 p-范数阶数
+const HAND_NORM_SCALE = 1.0; // 旧 p-范数合并的幅值系数（beta_1.1.1 起由 HAND_MERGE_SCALE 承担）
+// beta_1.1.1：手内 band 合并方式（hand-size 中性）。可选 "softmax"（默认）|"pnorm"|"rms"|"mean"|"max"。
+const HAND_MERGE_MODE = "prodadd";
+// 行速率项：gPred += ROW_RATE_BETA[k] · ln(rowsPerSec / ROW_RATE_REF)（逐键标定；行/秒 = 行数/跨度）
+const ROW_RATE_REF = 8.0;
+const ROW_RATE_BETA = { 4: 0.051, 6: 0.048, 7: 0.273 };
+// 行合并核宽度（ms）：小于该量级的时间偏移视为同一行的轻微错位
+const ROW_RATE_MERGE_MS = 12.0;
+// 乘积式手内合并的混合强度：v = activeMean × (1 + λ·ln M)（1.1.2 实验参数，默认 0=关闭）
+const MERGE_BLEND_LAMBDA = 0.0;
+// 乘积附加项的分键强度（prodadd 模式；4K 单手只有一条 band，乘积因子恒为 1，天然不受影响）
+const MERGE_LAMBDA_BY_KEY = { 6: 0.00, 7: 0.35 };
+// 和弦尺寸变化成本（手内）：3↔1 交替（跳/衩）比同尺寸轮换更难；仅对 >2 轨手生效，4K 不变。
+const MERGE_CHORD_ALT = 0.22;
+const HAND_MERGE_SCALE = 1.0;
+const HAND_MERGE_BOTH = 0.0;
 
 // ---- 连续映射曲线（beta_1.0.5 = weakgate_smallweight：7.3 / 9.2 衔接点；末段归一化斜率 0.85）----
 const MAP_KNOTS = [
     [0.3, 1.6], [2.45, 1.6], [3.85, 0.9], [4.5, 2.0],
     [7.3, 2.0], [9.2, 1.0], [12.05, 0.9], [12.6, 0.6], [14.2, 0.8], [15.6, 1.0],
 ];
-const MAP_COEF = [
-    2.409901630718964,
-    0.2499999999999991,
-    0.04,
-    0.518,
-    0.4187,
-    0.04,
-    0.04,
-    0.0783,
-    0.04,
-    0.1567,
-    0.2574,
-    0.1596,
-    -0.039566345789796765,
-];
+const MAP_COEF = [2.044804, 0.04, 0.389044, 0.320882, 0.327904, 0.04, 0.04, 0.082575, 0.04, 0.144641, 0.279896, 0.135792, -0.039566345789796765];
 const MAP_LEAD = 1 + MAP_KNOTS.length + 1; // c + σ_0..σ_K 的个数
-const FIT_E_CHORD = 0.0; // no-chord：E=0
 const FIT_D_LNN = MAP_COEF[MAP_LEAD]; // ln N 系数（index 12）
 // ---- RC v8 结构特征修正层（b1.0.6）----
 // g = ln(n) - E*chord - D*lnN + C0 + Σ κ_i·f_i，rc = mapInvert(g)。
@@ -150,32 +150,19 @@ const MAP6_KNOTS = [
     [4.8, 0.9],
     [6.8, 0.9],
 ];
-const MAP6_COEF = [
-    2.5840038159493437,
-    0.1679002721878934,
-    0.3992381792027269,
-    0.04000000000000001,
-    0.10284031220804582,
-    0.0878273291884741,
-    -0.039566345789796765,
-];
+const MAP6_COEF = [2.20586, 0.15943, 0.41575, 0.04000, 0.10327, 0.08891, -0.039566345789796765];
 
 // ---- b1.0.6：7K RC 专用映射层（仅 kTotal===7；与 4K/6K 同构的连续斜率曲线）----
 // 60 首 7K Dan RC 基准拟合：value 空间 RMSE=0.8954，R²=0.9571，留一档 CV RMSE={'layout': 'K3', 'loo_dan_rmse': 0.9603230202258823, 'candidates': [{'layout': 'K3', 'K': 3, 'rmse': 0.8953513876943069, 'cv': 0.9603230202258823, 'min_slope': 0.08627980559930505, 'coef': [2.7134457835966765, 0.252424344976386, 0.05174847111629122, 0.04000000000000001, 0.11396783657307301, -0.039566345789796765]}, {'layout': 'K4', 'K': 4, 'rmse': 0.889651421964562, 'cv': 0.9744665620168235, 'min_slope': 0.08704710562684582, 'coef': [2.70929319987703, 0.263086733280996, 0.04000000000000001, 0.13519944334793055, 0.04000000000000001, 0.11527273060705141, -0.039566345789796765]}, {'layout': 'K5', 'K': 5, 'rmse': 0.8843703762719594, 'cv': 0.9891810555581965, 'min_slope': 0.0739439411999284, 'coef': [2.7108475353074684, 0.2550457974796599, 0.04000000000000001, 0.2196950495157715, 0.04000000000000001, 0.04000000000000001, 0.11751850248117413, -0.039566345789796765]}, {'layout': 'K6', 'K': 6, 'rmse': 0.8806540421421409, 'cv': 0.9906357647634653, 'min_slope': 0.07564477193171282, 'coef': [2.6902440248818755, 0.30887424910871086, 0.04000000000000001, 0.04000000000000001, 0.23835371274909736, 0.04000000000000001, 0.04000000000000001, 0.1178696261405577, -0.039566345789796765]}, {'layout': 'K6n', 'K': 6, 'rmse': 0.8762140236944764, 'cv': 0.9938440086134521, 'min_slope': 0.06261091570011192, 'coef': [2.67222700460188, 0.3153424546266918, 0.04000000000000001, 0.04000000000000025, 0.24766169213519557, 0.04000000000000001, 0.04000000000000001, 0.11776128606828624, -0.039566345789796765]}, {'layout': 'K8', 'K': 8, 'rmse': 0.8771870811273467, 'cv': 1.031813421623775, 'min_slope': 0.07821419662823663, 'coef': [2.674244562852302, 0.3366374386764853, 0.04000000000000001, 0.04000000000000001, 0.26753059708611, 0.04000000000000001, 0.04000000000000001, 0.15659091978790815, 0.04000000000000001, 0.11878250917904475, -0.039566345789796765]}]}。
 // 复现：_analysis7k/fit_rc_map.py（参数快照 _analysis7k/_rc7_map_v13.json）。
 const MAP7_KNOTS = [
-    [2.3, 0.8],
-    [3.5, 0.8],
-    [4.7, 0.8],
+    [1.8, 0.6],
+    [2.8, 0.6],
+    [3.8, 0.6],
+    [4.8, 0.6],
+    [5.8, 0.6],
 ];
-const MAP7_COEF = [
-    2.7134457835966765,
-    0.252424344976386,
-    0.05174847111629122,
-    0.04000000000000001,
-    0.11396783657307301,
-    -0.039566345789796765,
-];
+const MAP7_COEF = [2.18397, 0.27576, 0.04000, 0.18527, 0.07340, 0.04000, 0.11959, -0.039566345789796765];
 
 // 局部间隔多样性（irregularity）参数
 const IRR_LOCAL_WINDOW = 16;
@@ -186,11 +173,43 @@ const IRR_LOG_DEN = Math.log(IRR_BANDWIDTH * Math.sqrt(2.0 * Math.PI));
 const IRR_ENT_COEF = -0.5 * IRR_INV2H2;
 
 // ---- ln 参考难度参数 ----
-const LN_MULT_REL = 2.26321400; // γ_rel（v6d 光滑面缝折扣后全量调参）
-const LN_MULT_JACK = 9.98250600; // γ_jack（v6d 全量调参）
+const LN_MULT_REL = 2.26321400;
+// 逐键 γ_rel（均匀度/时长条件改写后重新标定：4K 1.10×、6K/7K 1.50×）
+const LN_MULT_REL_BY_KEY = { 4: 2.48953540, 6: 3.39482090, 7: 3.39482090 }; // γ_rel（v6d 光滑面缝折扣后全量调参）
+const LN_MULT_JACK = 9.98250600;
+// 逐键 γ_jack（jack 项与映射层联合重标定后的最优：4K 6×、6K 4×、7K 1×）
+const LN_MULT_JACK_BY_KEY = { 4: 59.895036, 6: 39.930024, 7: 9.982506 }; // γ_jack（v6d 全量调参）
 const LN_MULT_CROSS = 1.88969303; // γ_cross（S_cross）
 const LN_MULT_HOLD = 2.67786127; // γ_hold（S_hold）
-const LN_MULT_ADJ = 0.54890200; // γ_adj（S_adj 头尾相邻性，v6d 全量调参）
+const LN_MULT_ADJ = 0.28817355; // γ_adj（S_adj 头尾相邻性，v6d 全量调参）
+// LN v18：衩（fork）——同手相邻三轨中，中间轨松手时左右两轨仍在保持/被按（手指独立性）。
+// 仅 6K/7K（手内 ≥3 轨）有意义；4K 每手只有 2 轨，衩不被检出。
+const LN_MULT_FORK = 1.0;
+// 盾键（LN × RC 交集）：LN 保持期间同手相邻轨出现单点，需抬指/换指才能按到。
+// γ 逐键标定（默认 0 = 关闭，保持 1.1.2 行为）；见 _analysis/_ln_shield_calib.py。
+const LN_SHIELD_W = { 4: 0.0, 6: 0.0, 7: 0.0 };
+const LN_SHIELD_TOL_MS = 20.0;
+// LN 锚的常数项 b：u = ln(1 + LN_B·(k·n + b))，用于「线性 + 倍率」联合模型（默认 0）。
+const LN_ADD_B = { 4: 0.0, 6: 0.0, 7: 0.0 };
+// 盾（头侧）：同轨单点紧接 LN 头 → 头判时机难度。独立于密度的量，加在指数域：
+//   u = ln(1 + LN_B·k·n + LN_B·(b + β_shield·S_shieldHead + β_rel·S_release))
+// 放在指数域里，它的相对占比随密度自然淡出（“先占主头、后逐渐淡出”）。
+const LN_SHIELD_HEAD_W = { 4: 0.0, 6: 0.0, 7: 0.0 };
+const LN_SHIELD_HEAD_TAU = 90.0;
+// 松手难度（带符号）：尾不与其它头/尾对齐 ↑、松开时同手邻近轨仍保持 ↑、
+// 尾接近其它轨的头 ↓（避免与 S_jack 对反键型重复增益）。
+const LN_RELEASE_W = { 4: 10.0, 6: 10.0, 7: 10.0 };
+// 对齐其它起音时仍保留的基础难度（避免“对齐 = 无难度”，且保证 score 永不为负）
+const LN_REL_FLOOR = 0.15;
+const LN_REL_ALIGN_TAU = 150.0;
+const LN_REL_HOLD_TAU = 120.0;
+const LN_REL_HEAD_TAU = 100.0;
+const LN_REL_HEAD_PEN = 1.0;
+const LN_FORK_TOL_MS = 20.0; // 放手时刻与邻轨保持区间的重叠容差
+// LN v18b：释放难度层 —— 长条在「与其它起音隔离」的时刻释放（玩家要在没有节拍提示的空隙里
+// 控制放手时刻），对 6K/7K 记 S_rel；4K 保持原样。
+const LN_REL_SOLO_MS = 120.0; // 释放点与最近其它起音的距离超过该值视为「孤立释放」
+const LN_REL_LONG_MS = 400.0; // 只有长条（≥ 该长度）的释放才算「释放难度」
 const LN_MULT_EXP = 5.07395755;
 const LN_MULT_RHO_C = 0.29415144;
 const LN_MULT_RHO_LIN = 0.0; // 低 ρ 段线性 toe 权重
@@ -204,8 +223,13 @@ const LN_HOLD_REF_MS = 40.0; // ln_hold_ref_ms：长度因子 ℓ/(ℓ+ℓ₀) �
 // 等间距面缝流）时需求整体保留 LN_UNI_FLOOR；CV ≥ LN_UNI_CV0 视为完全不均匀（不打折）。
 // 折扣同时作用于 S_rel / S_jack / S_cross；S_hold（长条本身）不折扣。
 const LN_UNI_CV0 = 0.45; // 视为“完全不均匀”的 CV 阈值
-const LN_UNI_FLOOR = 0.08; // 完全均匀排列的保留比例
-const LN_UNI_POWER = 0.7; // 折扣曲线指数
+const LN_UNI_FLOOR = 0.70; // 完全均匀排列的保留比例（不规整不再几乎无折扣：0.08→0.65）
+const LN_UNI_POWER = 0.5; // 折扣曲线指数
+const LN_UNI_T0 = 300.0;
+// 独立「Chordstream 关注」项（逐键）：加性权重（乘 Chordstream 音符密度）与局部混入比例。
+// 仅 4K 生效：6K/7K 上该特征无增量收益（替换或加入都会变差）。
+const LN_CS_ADD_BY_KEY = { 4: 0.30, 6: 0.0, 7: 0.0 };
+const LN_CS_MIX_BY_KEY = { 4: 0.50, 6: 0.0, 7: 0.0 }; // 不均性的相对时间尺度（ms）：CV = sd / (meanGap + T0)
 const LN_REL_W_MIN = 0.25; // 极短长条的长度权重下限（保留弱检出，避免 <ℓ_lo 直接归零）
 
 // ---- LN 模型 v6：S_jack 50ms 归零门控 + S_adj 头尾相邻性 ----
@@ -249,7 +273,7 @@ const LN_C = 1.0; // 兼容旧参数快照的占位常量；实际映射由 lnMa
 const LN_JACK_ANCHOR = 8.0; // 锚定值 S_a：临界间隙处的 S_jack = w·h·S_a
 const LN_JACK_OVERLAP_B2 = 0.5; // 重叠段二次项系数（u²）
 const LN_JACK_OVERLAP_B3 = 0.0; // 重叠段三次项系数（u³；0 = 纯二次）
-const LN_AGG_QUANTILE = 0.75; // 四项 S 的聚合分位（与 RC 的 findNQuantile 同机制）
+const LN_AGG_QUANTILE = 0.70; // 四项 S 的聚合分位（与 RC 的 findNQuantile 同机制）
 const LN_TLOC_B = 1.0; // 局部密度下界：exp(mean(ln(contrib+b))) − b 的 b
 const LN_TLOC_WINDOW = 16; // 局部窗口内的 RC contribution 个数（与 irr 窗口一致）
 const LN_TLOC_MIN_MS = 10.0;
@@ -337,6 +361,85 @@ function groupLane(times) {
     return result;
 }
 
+// 重叠键检测：同一轨、同一时间戳（浮点精确相等）上的多个物件。
+// 返回需要在 RC / LN 图上标红线的时刻列表（每线一个元素），以及总线条数。
+//   - 纯单点叠放 → RC 图（n 个物件 → n-1 根线）
+//   - 单点被 LN 覆盖 → RC 图（单点位置）
+//   - LN 与 LN 叠放 → LN 图（位于下方的 LN 头位置，n 个 LN → n-1 根线）
+function detectOverlaps(lanes) {
+    const rc = [];
+    const ln = [];
+    const nearRc = [];
+    const nearLn = [];
+    const pos = { rc: [], ln: [], nearRc: [], nearLn: [] };
+    const push = (arr, list, t, lane, isLn) => {
+        arr.push(t);
+        list.push({ t, lane, ln: isLn ? 1 : 0 });
+    };
+    for (let li = 0; li < lanes.length; li += 1) {
+        const lane = lanes[li];
+        // 精确叠放（同一时间戳）
+        let i = 0;
+        while (i < lane.length) {
+            let j = i;
+            while (j + 1 < lane.length && lane[j + 1].t === lane[i].t) {
+                j += 1;
+            }
+            const count = j - i + 1;
+            if (count > 1) {
+                let lnCount = 0;
+                for (let k = i; k <= j; k += 1) {
+                    if (lane[k].len > 0) lnCount += 1;
+                }
+                const tapCount = count - lnCount;
+                const rcLines = lnCount === 0 ? count - 1 : tapCount;
+                for (let k = 0; k < rcLines; k += 1) push(rc, pos.rc, lane[i].t, li, false);
+                for (let k = 0; k < lnCount - 1; k += 1) push(ln, pos.ln, lane[i].t, li, true);
+            }
+            i = j + 1;
+        }
+    }
+    // 近似重叠（仅图表标注，不影响算法）：
+    //   RC：同轨相邻间隔 < 5ms 且 < 周围间隔最小值的 1/40；
+    //   LN：面缝（LN 尾 → 下一头）< 5ms 且 < 周围头/米间隔最小值的 1/80，标在面缝后的头处。
+    for (let li = 0; li < lanes.length; li += 1) {
+        const lane = lanes[li];
+        const n = lane.length;
+        if (n < 2) continue;
+        const gap = new Float64Array(n - 1);
+        for (let i = 1; i < n; i += 1) gap[i - 1] = Math.max(0.0, lane[i].t - lane[i - 1].t);
+        // RC 侧
+        for (let i = 1; i < n; i += 1) {
+            const g = gap[i - 1];
+            if (!(g > 0.0 && g < 5.0)) continue;
+            const prevG = i >= 2 ? gap[i - 2] : 0.0;
+            const nextG = i < gap.length ? gap[i] : 0.0;
+            const around = Math.min(prevG, nextG);
+            if (g < around / 40.0) push(nearRc, pos.nearRc, lane[i].t, li, false);
+        }
+        // LN 侧（面缝）
+        for (let i = 0; i < n - 1; i += 1) {
+            const cur = lane[i];
+            if (!(cur.len > 0.0)) continue;
+            const seam = lane[i + 1].t - (cur.t + cur.len);
+            if (!(seam > 0.0 && seam < 5.0)) continue;
+            const prevG = i >= 1 ? gap[i - 1] : 0.0;
+            const nextG = i + 1 < gap.length ? gap[i + 1] : 0.0;
+            const around = Math.min(prevG, nextG);
+            if (seam < around / 80.0) push(nearLn, pos.nearLn, lane[i + 1].t, li, true);
+        }
+    }
+    return {
+        rc,
+        ln,
+        total: rc.length + ln.length,
+        nearRc,
+        nearLn,
+        nearTotal: nearRc.length + nearLn.length,
+        positions: pos,
+    };
+}
+
 // 升序去重（容忍 TIME_EPS）。
 function uniqueSorted(times) {
     const out = [];
@@ -351,7 +454,6 @@ function uniqueSorted(times) {
 // ---- RC v10 结构修正常数（连续核，全部无分段）----
 const V11_EXTRA_SIGMA = 0.35;   // EXTRA 核宽度（相对局部间隔 a）
 const V11_BOTH = 0.45;          // 双手同时活跃的协同加成（乘在 min(左,右) 上）
-const V11_CHORD = 0.0;          // 合并行押数因子（0 = 关闭）
 let RC11_KTOTAL = 4;
 function v11Cfg(key, fallback) {
     const o = (typeof globalThis !== 'undefined') ? globalThis.__V11 : null;
@@ -369,32 +471,38 @@ function mergeOp(a, b) {
 // 手内轨道布局：4K = 每手两轨；6K = 每手三轨（左手 0/1/2，右手 3/4/5）。
 // 其它键数沿用 4K 的相邻配对规则（奇数键数时最后一手只有 1 轨）。
 function handLayoutOf(kTotal) {
-    if (kTotal === 6) {
-        return [[0, 1, 2], [3, 4, 5]];
+    // 任意键数通用：左右手 = 连续两半，左手 floor(K/2) 轨、右手其余。
+    // 4K=2+2、5K=2+3、6K=3+3、7K=3+4、8K=4+4、9K=4+5、10K=5+5。
+    const left = Math.floor(kTotal / 2);
+    const hands = [[], []];
+    for (let i = 0; i < kTotal; i += 1) {
+        hands[i < left ? 0 : 1].push(i);
     }
-    if (kTotal === 7) {
-        return [[0, 1, 2], [3, 4, 5, 6]];
+    return hands.filter((h) => h.length > 0);
+}
+
+// 最大手宽（任意键数）：LN 的「衩/释放」层只在存在 >=3 轨的手时才有意义。
+function lnHandMaxLen(lanes) {
+    let m = 0;
+    for (const h of handLayoutOf(lanes.length)) {
+        if (h.length > m) m = h.length;
     }
-    const hands = [];
-    for (let s = 0; s < kTotal; s += 2) {
-        hands.push(s + 1 < kTotal ? [s, s + 1] : [s]);
-    }
-    return hands;
+    return m;
 }
 
 // 每手内的“配对轨”下标（RC 邻域额外 contribution 的 mate）。
 // 4K 为唯一同手轨道；6K 中轨/外轨都偏向内侧轨（rank0→rank1、rank1→rank0、rank2→rank1）。
 function handMateOf(hand, rank) {
-    if (hand.length < 2) {
+    const n = hand.length;
+    if (n < 2) {
         return hand[0];
     }
-    if (rank === 1) {
-        return hand[0];
+    // 通用配对规则：(0,1)(2,3)… 相邻成对；奇数轨手最后一轨与前一轨配对。
+    // 2 轨 → [1,0]；3 轨 → [1,0,1]；4 轨 → [1,0,3,2]；5 轨 → [1,0,3,2,3]。
+    if (n % 2 === 0 || rank < n - 1) {
+        return hand[rank ^ 1];
     }
-    if (rank === 0) {
-        return hand[1];
-    }
-    return hand[hand.length - 2];
+    return hand[n - 2];
 }
 
 // 每轨“同手其它轨”的下标列表（4K 长度 1；6K 长度 2；奇数键数落单轨长度 0）。
@@ -431,17 +539,11 @@ function laneContribs(groups, mateTimes, mateSizes) {
     if (n === 0) {
         return contribs;
     }
-    const penPen = mergeOp(OVERLAP_PENALTY, OVERLAP_PENALTY);
     for (let k = 0; k < n; k += 1) {
         const g = groups[k];
         const prevInv = (g.prevDt != null && g.prevDt > TIME_EPS) ? INV_DIST_SCALE / g.prevDt : 0.0;
         const nextInv = (g.nextDt != null && g.nextDt > TIME_EPS) ? INV_DIST_SCALE / g.nextDt : 0.0;
         let base = mergeOp(prevInv, nextInv);
-        if (g.size > 1) {
-            base = (g.size - 2) * penPen
-                + mergeOp(prevInv, OVERLAP_PENALTY)
-                + mergeOp(OVERLAP_PENALTY, nextInv);
-        }
 
         let extra = 0.0;
         if (EXTRA_RATE !== 0.0 && base > 0.0 && mateTimes.length > 0) {
@@ -549,10 +651,6 @@ function mergeDecaySequences(seqA, seqB) {
         const bothOn = RC11_KTOTAL === 4 || RC11_KTOTAL === 6 || RC11_KTOTAL === 7;
         const bothW = bothOn ? v11Cfg("both", V11_BOTH) : 0.0;
         let value = mergeOp(fa[k], fb[k]) + bothW * both;
-        const v11Chord = v11Cfg("chord", V11_CHORD);
-        if (v11Chord !== 0.0 && c > 1) {
-            value *= 1.0 + v11Chord * Math.log(c) / Math.LN2;
-        }
         out[k] = [unionTimes[k], value, c];
     }
     return out;
@@ -734,8 +832,127 @@ const MAP_PROFILE_6K = makeMapProfile(MAP6_KNOTS, MAP6_COEF);
 const MAP_PROFILE_7K = makeMapProfile(MAP7_KNOTS, MAP7_COEF);
 let MAP_ACTIVE = MAP_PROFILE_4K; // 每次 calculateFixedDensity 内按键数切换
 
+// ---- 统一映射层（任意键数）----
+// value = scale_K · S(a_K·g + b_K)，S 为全键共享的单调折线（z 空间的 12 个节点）。
+// 每条键数只有 (a, b, scale) 三个标定常数——「算法与参数一致，只有难度标定不同」。
+// 4/6/7K 由三分键 benchmark 联合拟合：RMSE 0.4314 / 0.3018 / 0.8009
+// （对应旧三套独立映射 0.4365 / 0.3056 / 0.8053）。
+// 5/8/9/10K：内容移植标定（同一谱面移植到目标键数后与 7K 数值对齐），粗标定。
+const UMAP_KNOTS = [3.623611, 4.163574, 5.406860, 6.085749, 6.956064, 7.298338, 7.959245, 8.133186, 8.551638, 9.297130, 10.099199, 10.639488];
+const UMAP_HEIGHTS = [-0.984899, -0.054499, 1.194019, 2.198958, 3.634215, 4.890067, 6.350227, 7.294950, 9.183649, 12.023020, 13.486152, 14.693033];
+const UMAP_KEYS = {
+    1: { a: 0.884056, b: 3.600612, scale: 1.030920 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+    2: { a: 1.297584, b: 1.253190, scale: 1.349976 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+    3: { a: 1.341735, b: 1.091961, scale: 1.331232 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+    4: { a: 2.374768, b: -0.507805, scale: 1.111704 }, // 1.1.2 完全校准（连续行速率 + chordAlt 0.22）
+    5: { a: 1.663421, b: 0.979979, scale: 1.078905 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+    6: { a: 2.152658, b: -0.143555, scale: 1.619499 }, // 1.1.2 完全校准（连续行速率 + chordAlt 0.22）
+    7: { a: 3.056075, b: -1.998326, scale: 0.824269 }, // 1.1.2 完全校准（连续行速率 + chordAlt 0.22）
+    8: { a: 2.032005, b: 1.196105, scale: 1.144815 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+    9: { a: 2.198881, b: 1.641738, scale: 0.878277 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+    10: { a: 2.353678, b: 1.413461, scale: 0.921618 }, // see README 0.5 (joint fit for 4/6/7; content-port fit otherwise)
+};
+let UMAP_ACTIVE = null;
+
+// 未标定键数：在相邻已标定键数之间按 (a, b, scale) 线性插值（端点外沿用最近端点）。
+function umapFor(kTotal) {
+    const entry = UMAP_KEYS[kTotal];
+    if (entry) {
+        return entry;
+    }
+    const ks = Object.keys(UMAP_KEYS).map(Number).sort((x, y) => x - y);
+    if (ks.length === 0) return null;
+    if (kTotal <= ks[0]) return UMAP_KEYS[ks[0]];
+    if (kTotal >= ks[ks.length - 1]) return UMAP_KEYS[ks[ks.length - 1]];
+    let idx = 0;
+    while (idx < ks.length - 1 && ks[idx + 1] <= kTotal) idx += 1;
+    const k0 = ks[idx];
+    const k1 = ks[idx + 1];
+    const f = (kTotal - k0) / (k1 - k0);
+    const p0 = UMAP_KEYS[k0];
+    const p1 = UMAP_KEYS[k1];
+    return {
+        a: p0.a + f * (p1.a - p0.a),
+        b: p0.b + f * (p1.b - p0.b),
+        scale: p0.scale + f * (p1.scale - p0.scale),
+    };
+}
+
+// 共享单调折线（线性外推）
+function umapShape(z) {
+    const xs = UMAP_KNOTS;
+    const ys = UMAP_HEIGHTS;
+    const n = xs.length;
+    if (z <= xs[0]) {
+        return ys[0] + (z - xs[0]) * (ys[1] - ys[0]) / (xs[1] - xs[0]);
+    }
+    if (z >= xs[n - 1]) {
+        return ys[n - 1] + (z - xs[n - 1]) * (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]);
+    }
+    let lo = 0;
+    let hi = n - 1;
+    while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (xs[m] <= z) lo = m;
+        else hi = m;
+    }
+    const f = (z - xs[lo]) / (xs[hi] - xs[lo]);
+    return ys[lo] + f * (ys[hi] - ys[lo]);
+}
+
+function umapShapeSlope(z) {
+    const xs = UMAP_KNOTS;
+    const ys = UMAP_HEIGHTS;
+    const n = xs.length;
+    if (z <= xs[0]) return (ys[1] - ys[0]) / (xs[1] - xs[0]);
+    if (z >= xs[n - 1]) return (ys[n - 1] - ys[n - 2]) / (xs[n - 1] - xs[n - 2]);
+    let lo = 0;
+    let hi = n - 1;
+    while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (xs[m] <= z) lo = m;
+        else hi = m;
+    }
+    return (ys[hi] - ys[lo]) / (xs[hi] - xs[lo]);
+}
+
+function umapShapeInv(y) {
+    const xs = UMAP_KNOTS;
+    const ys = UMAP_HEIGHTS;
+    const n = xs.length;
+    if (y <= ys[0]) return xs[0] + (y - ys[0]) * (xs[1] - xs[0]) / (ys[1] - ys[0]);
+    if (y >= ys[n - 1]) return xs[n - 1] + (y - ys[n - 1]) * (xs[n - 1] - xs[n - 2]) / (ys[n - 1] - ys[n - 2]);
+    let lo = 0;
+    let hi = n - 1;
+    while (hi - lo > 1) {
+        const m = (lo + hi) >> 1;
+        if (ys[m] <= y) lo = m;
+        else hi = m;
+    }
+    const f = (y - ys[lo]) / (ys[hi] - ys[lo]);
+    return xs[lo] + f * (xs[hi] - xs[lo]);
+}
+
+// mapInvert: g → value（映射值空间 → 最终难度值）
+function umapInvert(g) {
+    const p = UMAP_ACTIVE;
+    return p.scale * umapShape(p.a * g + p.b);
+}
+
+// mapForward: value → g（反函数，供刻度 / 曲线还原使用）
+function umapForward(v) {
+    const p = UMAP_ACTIVE;
+    return (umapShapeInv(v / p.scale) - p.b) / p.a;
+}
+
+
 // 一次遍历同时给出映射值与导数（g'(v)），供 Newton 求逆使用。
 function mapForwardDeriv(v) {
+    if (UMAP_ACTIVE) {
+        const p = UMAP_ACTIVE;
+        const z = p.a * v + p.b;
+        return [p.scale * umapShape(z), p.scale * umapShapeSlope(z) * p.a];
+    }
     const P = MAP_ACTIVE;
     const K = P.K;
     for (let i = 0; i < K; i += 1) {
@@ -786,6 +1003,9 @@ function mapBasis(v) {
 }
 
 function mapForwardBase(v) {
+    if (UMAP_ACTIVE) {
+        return umapForward(v);
+    }
     const P = MAP_ACTIVE;
     const w = mapBasis(v);
     let sum = P.coef[0];
@@ -803,6 +1023,9 @@ function mapForward(v) {
 // 用上一次解热启动可把典型迭代次数压到 1–2 次。
 let MAP_INVERT_LAST = 0.0;
 function mapInvert(target) {
+    if (UMAP_ACTIVE) {
+        return umapInvert(target);
+    }
     const scale = Math.max(1.0, Math.abs(target));
     const tol = 1e-13 * scale;
     let v = Number.isFinite(MAP_INVERT_LAST) ? MAP_INVERT_LAST : 0.0;
@@ -845,11 +1068,11 @@ function mapInvert(target) {
 // u = ln(1 + LN_B·k·n)；slope(u) = LN_MAP_S0 + Σ Δ_i·σ((u − u_i)/β)，
 // value(u) = LN_MAP_C + LN_MAP_S0·u + Σ Δ_i·β·softplus((u − u_i)/β)。
 // 全式连续可导（softplus/sigmoid），无分段裁剪；Δ 可正可负，靠斜率下限约束保证单调。
-const LN_MAP_BETA = 0.07;
-const LN_MAP_S0 = 8.009100;
-const LN_MAP_C = 0.471100;
+const LN_MAP_BETA = 0.362931;
+const LN_MAP_S0 = 9.253036;
+const LN_MAP_C = -0.592936;
 const LN_MAP_KNOTS = [0.10, 0.25, 0.42, 0.60, 0.80, 1.02, 1.28, 1.60];
-const LN_MAP_DELTA = [-0.8245,-0.9193,-0.8087,-0.3216,0.9749,3.3042,2.9582,-4.2032];
+const LN_MAP_DELTA = [6.000000,6.000000,6.000000,6.000000,6.000000,6.000000,-5.999999,-6.000000];
 
 // 复用缓冲：K = LN_MAP_KNOTS.length 固定。
 const LN_MAP_PHI = new Float64Array(LN_MAP_KNOTS.length);
@@ -930,19 +1153,22 @@ function lnMapInvert(target) {
 }
 
 // raw（= 逐事件/整谱的 k·n 或 raw·n）→ LN 等级；raw ≤ 0 视为无 LN 需求。
-function lnFromRawMapped(raw, nForLn) {
+function lnFromRawMapped(raw, nForLn, add) {
     if (!(nForLn > 0.0) || !(raw > 0.0)) {
         return 0.0;
     }
-    return lnMapForward(Math.log1p(LN_B * raw * nForLn));
+    const extra = Number.isFinite(add) ? add : 0.0;
+    return lnMapForward(Math.log1p(LN_B * raw * nForLn + extra));
 }
 
 // LN 等级 → raw（图表刻度/锚点反算）。
-function lnRawFromValue(value, nForLn) {
+function lnRawFromValue(value, nForLn, add) {
     if (!(nForLn > 0.0) || !Number.isFinite(value)) {
         return Number.NaN;
     }
-    return Math.expm1(lnMapInvert(value)) / (LN_B * nForLn);
+    const extra = Number.isFinite(add) ? add : 0.0;
+    const inner = Math.expm1(lnMapInvert(value)) - extra;
+    return inner / (LN_B * nForLn);
 }
 
 // 滑窗 KDE 交叉熵：返回每窗熵与起始下标。
@@ -1538,6 +1764,92 @@ function invGap(d) {
 // 局部密度下界 → 时间尺度 T_loc（ms）：窗口内 RC contribution 的几何均值
 // （exp(mean(ln(c+b))) − b）作为“密度下界”，其倒数即局部间隔下界。
 // 与 OD 判定窗相加得到 S_jack 的临界间隙，决定“大规模增益”何时开始。
+// 在 LN 锚层插入「Chordstream 关注」的实验项（默认关闭，__V11 覆盖）。
+//
+// 1) 用与 RC 涂色条完全一致的规则把谱面切成 Jacks / Stream / Chordstream 区间；
+// 2) 统计 Chordstream 区间的音符密度（notes/s）与占比；
+// 3) lnAnchorMode:
+//      0 = 现状（RC 分位 + occupancy + 局部音符密度）
+//      1 = nRc 分位换成 Chordstream 密度
+//      2 = 局部密度换成「Chordstream 音符的局部密度」
+//      3 = 两者都换
+// 旋钮：lnAnchorMode、lnAnchorMode{K}、lnCsW、lnCsWin。
+function lnChordstreamMetrics(rawLanes) {
+    const rows = [];
+    for (const lane of rawLanes) {
+        for (const n of lane) rows.push({ t: n.t, lane });
+    }
+    if (rows.length < 4) return { csDensity: 0.0, csShare: 0.0, csTimes: [], span: 0.0 };
+    rows.sort((a, b) => a.t - b.t);
+    // 同刻合并
+    const merged = [];
+    for (const r of rows) {
+        const last = merged[merged.length - 1];
+        if (last && Math.abs(last.t - r.t) < 1e-6) {
+            if (!last.lanes.includes(r.lane)) last.lanes.push(r.lane);
+        } else {
+            merged.push({ t: r.t, lanes: [r.lane] });
+        }
+    }
+    const MERGE_GAP = 15.0;
+    const shareLane = (a, b) => a.some((x) => b.includes(x));
+    // 同 rcintervals：间距 <15ms、无同轨、且小于上下间距最大值的 1/4 时合并（迭代取最优候选）
+    for (;;) {
+        const gaps = [];
+        for (let i = 0; i + 1 < merged.length; i += 1) gaps.push(merged[i + 1].t - merged[i].t);
+        let pick = -1;
+        let pickRatio = Infinity;
+        for (let i = 0; i + 1 < merged.length; i += 1) {
+            const g = gaps[i];
+            if (g >= MERGE_GAP) continue;
+            if (shareLane(merged[i].lanes, merged[i + 1].lanes)) continue;
+            const above = i > 0 ? gaps[i - 1] : Infinity;
+            const below = i + 2 < merged.length ? gaps[i + 1] : Infinity;
+            const ref = Math.max(Number.isFinite(above) ? above : -Infinity, Number.isFinite(below) ? below : -Infinity);
+            const limit = Number.isFinite(ref) && ref > 0 ? ref * 0.25 : Infinity;
+            if (!(g < limit)) continue;
+            const ratio = g / (limit || 1);
+            if (ratio < pickRatio) { pick = i; pickRatio = ratio; }
+        }
+        if (pick < 0) break;
+        const a = merged[pick];
+        const b = merged[pick + 1];
+        const na = a.lanes.length;
+        const nb = b.lanes.length;
+        merged.splice(pick, 2, {
+            t: (a.t * na + b.t * nb) / (na + nb),
+            lanes: [...new Set([...a.lanes, ...b.lanes])].sort((x, y) => x - y),
+        });
+    }
+    if (merged.length < 3) return { csDensity: 0.0, csShare: 0.0, csTimes: [], span: 0.0 };
+    const segs = [];
+    for (let i = 0; i + 1 < merged.length; i += 1) {
+        const A = merged[i];
+        const B = merged[i + 1];
+        segs.push({ type: shareLane(A.lanes, B.lanes) ? "Jacks" : "Stream" });
+    }
+    for (let i = 0; i + 1 < segs.length; i += 1) {
+        if (segs[i].type === "Jacks" || segs[i + 1].type === "Jacks") continue;
+        if (!shareLane(merged[i].lanes, merged[i + 2].lanes)) continue;
+        segs[i].type = "Chordstream";
+        segs[i + 1].type = "Chordstream";
+    }
+    let csNotes = 0;
+    let allNotes = 0;
+    const csTimes = [];
+    for (let i = 0; i < merged.length; i += 1) {
+        const type = (segs[i] || segs[i - 1] || { type: "Stream" }).type;
+        const n = merged[i].lanes.length;
+        allNotes += n;
+        if (type === "Chordstream") {
+            csNotes += n;
+            csTimes.push(merged[i].t);
+        }
+    }
+    const span = Math.max(1e-6, (merged[merged.length - 1].t - merged[0].t) / 1000.0);
+    return { csDensity: csNotes / span, csShare: allNotes > 0 ? csNotes / allNotes : 0.0, csTimes, span };
+}
+
 function lnLocalDensityTime(tauScaled, density) {
     if (!density || !density.times || density.times.length === 0) {
         return 90.0;
@@ -1574,7 +1886,15 @@ function lnAggregate(values) {
     if (!values || values.length === 0) {
         return 0.0;
     }
-    return findNQuantile(Float64Array.from(values), LN_AGG_QUANTILE);
+    return findNQuantile(Float64Array.from(values), v11Cfg("lnAggQ", LN_AGG_QUANTILE));
+}
+
+// 指定分位的聚合（目前只给 S_rel 用，便于单独扫分位）。
+function lnAggregateAt(values, q) {
+    if (!values || values.length === 0) {
+        return 0.0;
+    }
+    return findNQuantile(Float64Array.from(values), q);
 }
 
 // 单轨 LN 事件的三项结构量；该轨无 LN 时返回 null。
@@ -1624,18 +1944,230 @@ function lnEventScores(col, partnerCol, od, invRate = 1.0, density = null, other
             varSum += d * d;
         }
         const sd = Math.sqrt(varSum / (tt.length - 1));
-        const cv = meanGap > TIME_EPS ? sd / meanGap : 0.0;
-        const t = Math.min(1.0, Math.max(0.0, cv / LN_UNI_CV0));
-        uni.fill(LN_UNI_FLOOR + (1.0 - LN_UNI_FLOOR) * Math.pow(t, LN_UNI_POWER));
+        // 不均性口径：默认相对 CV；lnUniT0>0 时用“相对时间”口径 sd/(meanGap+T0)，
+        // 让短间隔的绝对离散不被当成同等不规整。
+        const uniCv0 = v11Cfg("lnUniCv0", LN_UNI_CV0);
+        const uniFloor = v11Cfg("lnUniFloor", LN_UNI_FLOOR);
+        const uniPower = v11Cfg("lnUniPower", LN_UNI_POWER);
+        const uniT0 = v11Cfg("lnUniT0", LN_UNI_T0);
+        const uniCap = v11Cfg("lnUniCap", 1.0);
+        const cv = meanGap + uniT0 > TIME_EPS ? sd / (meanGap + uniT0) : 0.0;
+        const t = Math.min(1.0, Math.max(0.0, cv / uniCv0));
+        const uniVal = uniFloor + (1.0 - uniFloor) * Math.pow(t, uniPower);
+        uni.fill(Math.min(uniCap, uniVal));
     }
 
     // S_rel：同轨相邻松手间距倒数的算术平均（v5：L2 → 均值，消除均匀流的 √2 双计）。
+    // 实验模式（__V11.lnRelMode）：
+    //   0 = 现状（尾–尾间隔 × 自身长度权重）
+    //   1 = 面尾 → 同轨下一次按下（含短面头/单点）
+    //   2 = 尾–尾间隔，但按 min(w_i, w_neighbor) 配对权重（长面不再被短面拖高）
+    //   3 = 同轨 press/release 翻转率（每秒切换次数，滑窗）
+    //   4 = 弃用 sRel：改为 sShort（短面自身）+ sRePress（尾→按下，饱和）
+    const relMode = v11Cfg("lnRelMode", 6.0);
     const sRel = new Float64Array(tt.length);
+    const sShort = new Float64Array(tt.length);
+    const sRePress = new Float64Array(tt.length);
+    const tailGapNext = new Float64Array(tt.length);
+    tailGapNext.fill(-1.0);
     for (let i = 0; i < tt.length; i += 1) {
-        const pd = i > 0 ? tt[i] - tt[i - 1] : -1.0;
-        const nd = i + 1 < tt.length ? tt[i + 1] - tt[i] : -1.0;
-        const wEff = Math.max(w[i], LN_REL_W_MIN);
-        sRel[i] = 0.5 * (invGap(pd) + invGap(nd)) * wEff * uni[i];
+        let lo = 0;
+        let hi = presses.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (presses[mid] <= tt[i]) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        tailGapNext[i] = lo < presses.length ? presses[lo] - tt[i] : -1.0;
+    }
+    const lenAvg = new Float64Array(tt.length);
+    for (let i = 0; i < tt.length; i += 1) {
+        const e = lenAcc.get(tt[i]);
+        lenAvg[i] = e ? e[0] / e[1] : 0.0;
+    }
+    const sig = (x) => 1.0 / (1.0 + Math.exp(-x));
+    if (relMode >= 3.5 && relMode < 4.5) {
+        const shortL0 = v11Cfg("lnShortL0", 200.0);
+        const shortTau = v11Cfg("lnShortTau", 60.0);
+        const repD0 = v11Cfg("lnRepD0", 80.0);
+        const repTau = v11Cfg("lnRepTau", 25.0);
+        for (let i = 0; i < tt.length; i += 1) {
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            sRel[i] = 0.0;
+            sShort[i] = wEff * sig((shortL0 - lenAvg[i]) / shortTau);
+            const d = tailGapNext[i];
+            sRePress[i] = d >= 0.0 ? wEff * sig((repD0 - d) / repTau) : 0.0;
+        }
+    } else if (relMode >= 2.5 && relMode < 3.5) {
+        // 翻转率：把该轨 press / release 合并成时间序列，统计尾附近每秒翻转次数。
+        const evT = [];
+        const evR = [];
+        for (const p of presses) { evT.push(p); evR.push(1); }
+        for (const t of tt) { evT.push(t); evR.push(0); }
+        const order = evT.map((t, idx) => idx).sort((a, b) => evT[a] - evT[b]);
+        const W = v11Cfg("lnFlipWin", 250.0);
+        for (let i = 0; i < tt.length; i += 1) {
+            let flips = 0;
+            let lastType = -1;
+            for (const idx of order) {
+                const t = evT[idx];
+                if (t < tt[i] - W) continue;
+                if (t > tt[i] + W) break;
+                const type = evR[idx];
+                if (lastType >= 0 && type !== lastType) flips += 1;
+                lastType = type;
+            }
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            sRel[i] = (flips / (2.0 * W / 1000.0)) * wEff;
+        }
+    } else if (relMode >= 1.5 && relMode < 2.5) {
+        for (let i = 0; i < tt.length; i += 1) {
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            const wPrev = i > 0 ? Math.min(wEff, Math.max(w[i - 1], LN_REL_W_MIN)) : 0.0;
+            const wNext = i + 1 < tt.length ? Math.min(wEff, Math.max(w[i + 1], LN_REL_W_MIN)) : 0.0;
+            const pd = i > 0 ? tt[i] - tt[i - 1] : -1.0;
+            const nd = i + 1 < tt.length ? tt[i + 1] - tt[i] : -1.0;
+            sRel[i] = 0.5 * (invGap(pd) * wPrev + invGap(nd) * wNext) * uni[i];
+        }
+    } else if (relMode >= 6.5 || relMode >= 5.5) {
+        // mode 6：锚点 = LN 头尾中点（单点仍用自身时间）；LN 前后的单点同样作为锚点参与取距。
+        // 这样「长面 + 短面」与「长面 + 单点」的锚点间距接近，不再把长面的尾间距算得过近。
+        const holdLenAt = new Map();
+        for (const n of holds) {
+            const prev = holdLenAt.get(n.t) || 0;
+            if (n.len > prev) {
+                holdLenAt.set(n.t, n.len);
+            }
+        }
+        const anc = [];
+        for (const p of presses) {
+            const len = holdLenAt.get(p) || 0;
+            anc.push({ t: p + len * 0.5, isLn: len > 0, len });
+        }
+        anc.sort((a, b) => a.t - b.t);
+        // 锚点间差距的 CV → 均匀度折扣（等间距墙仍然打折）
+        const uniAnchor = new Array(anc.length).fill(1.0);
+        if (anc.length >= 3) {
+            const gapsA = [];
+            for (let i = 1; i < anc.length; i += 1) gapsA.push(anc[i].t - anc[i - 1].t);
+            let mg = 0.0;
+            for (const g of gapsA) mg += g;
+            mg /= gapsA.length;
+            let vv = 0.0;
+            for (const g of gapsA) vv += (g - mg) * (g - mg);
+            const uCv0 = v11Cfg("lnUniCv0", LN_UNI_CV0);
+            const uFloor = v11Cfg("lnUniFloor", LN_UNI_FLOOR);
+            const uPower = v11Cfg("lnUniPower", LN_UNI_POWER);
+            const uT0 = v11Cfg("lnUniT0", LN_UNI_T0);
+            const uCap = v11Cfg("lnUniCap", 1.0);
+            const cvA = mg + uT0 > TIME_EPS ? Math.sqrt(vv / gapsA.length) / (mg + uT0) : 0.0;
+            const tt2 = Math.min(1.0, Math.max(0.0, cvA / uCv0));
+            const uu1 = Math.min(uCap, uFloor + (1.0 - uFloor) * Math.pow(tt2, uPower));
+            // 周期 2 的规则性：交替间距也算“规律”（长+短/长+米 的锚点序列常是 2 周期）
+            let uu2 = 1.0;
+            if (gapsA.length >= 4) {
+                const g2 = [];
+                for (let j = 1; j + 2 < gapsA.length; j += 1) {
+                    g2.push(Math.abs(gapsA[j] - gapsA[j + 2]) / Math.max(TIME_EPS, Math.max(gapsA[j], gapsA[j + 2])));
+                }
+                if (g2.length > 0) {
+                    let mg2 = 0.0;
+                    for (const x of g2) mg2 += x;
+                    mg2 /= g2.length;
+                    const tt3 = Math.min(1.0, Math.max(0.0, mg2 / uCv0));
+                    uu2 = Math.min(uCap, uFloor + (1.0 - uFloor) * Math.pow(tt3, uPower));
+                }
+            }
+            // 周期 2 规则性折扣的权重（lnUniPeriodW=1 现状；0 表示完全不看周期 2 一致性）
+            const periodW = v11Cfg("lnUniPeriodW", 1.0);
+            const uu = uu1 + (Math.min(uu1, uu2) - uu1) * periodW;
+            uniAnchor.fill(uu);
+        }
+        const byT = new Map();
+        for (let i = 0; i < anc.length; i += 1) {
+            byT.set(anc[i].t, i);
+        }
+        for (let i = 0; i < tt.length; i += 1) {
+            const a = tt[i] - lenAvg[i] * 0.5;
+            // 找到该锚点下标（浮点用邻近比较）
+            let idx = -1;
+            if (byT.has(a)) {
+                idx = byT.get(a);
+            } else {
+                let bestD = Infinity;
+                for (let j = 0; j < anc.length; j += 1) {
+                    const d = Math.abs(anc[j].t - a);
+                    if (d < bestD) { bestD = d; idx = j; }
+                }
+            }
+            const pd = idx > 0 ? anc[idx].t - anc[idx - 1].t : -1.0;
+            const nd = idx + 1 < anc.length ? anc[idx + 1].t - anc[idx].t : -1.0;
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            const uniUse = relMode >= 6.5 ? uni[i] : uniAnchor[idx];
+            const lnRelShortC = v11Cfg("lnRelShort", 0.0);
+            const lnRelShortIrreg = v11Cfg("lnRelShortIrreg", 0.0);
+            let shortGate = 1.0;
+            if (lnRelShortC !== 0.0) {
+                shortGate = 1.0 - lnRelShortC / (1.0 + Math.exp(-(200.0 - lenAvg[i]) / 60.0));
+            }
+            if (lnRelShortIrreg !== 0.0) {
+                const sigS = 1.0 / (1.0 + Math.exp(-(200.0 - lenAvg[i]) / 60.0));
+                shortGate *= 1.0 - lnRelShortIrreg * sigS * uniUse;
+            }
+            sRel[i] = 0.5 * (invGap(pd) + invGap(nd)) * wEff * uniUse * shortGate
+                * Math.pow(h[i], v11Cfg("lnRelH", 0.0));
+        }
+    } else if (relMode >= 4.5) {
+        // mode 5：短面不参与「尾–尾」间隔链（短面的难度由 sShort 承担），
+        // 长面之间按长面自己的尾序列算间隔 → 长面+短面 与 长面+单点 分值接近。
+        const longL0 = v11Cfg("lnRelSkipLen", 200.0);
+        const idxLong = [];
+        for (let i = 0; i < tt.length; i += 1) {
+            if (lenAvg[i] >= longL0) {
+                idxLong.push(i);
+            }
+        }
+        for (let i = 0; i < tt.length; i += 1) {
+            sRel[i] = -1.0;
+        }
+        for (let j = 0; j < idxLong.length; j += 1) {
+            const i = idxLong[j];
+            const pd = j > 0 ? tt[i] - tt[idxLong[j - 1]] : -1.0;
+            const nd = j + 1 < idxLong.length ? tt[idxLong[j + 1]] - tt[i] : -1.0;
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            sRel[i] = 0.5 * (invGap(pd) + invGap(nd)) * wEff * uni[i]
+                * Math.pow(h[i], v11Cfg("lnRelH", 0.0));
+        }
+    } else if (relMode >= 0.5) {
+        const relD0 = v11Cfg("lnRelD0", 30.0);
+        for (let i = 0; i < tt.length; i += 1) {
+            const d = tailGapNext[i];
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            sRel[i] = d >= 0.0 ? (INV_DIST_SCALE / (d + relD0)) * wEff : 0.0;
+        }
+    } else {
+        for (let i = 0; i < tt.length; i += 1) {
+            const pd = i > 0 ? tt[i] - tt[i - 1] : -1.0;
+            const nd = i + 1 < tt.length ? tt[i + 1] - tt[i] : -1.0;
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            sRel[i] = 0.5 * (invGap(pd) + invGap(nd)) * wEff * uni[i]
+                * Math.pow(h[i], v11Cfg("lnRelH", 0.0));
+        }
+    }
+    if (relMode < 3.5 || relMode >= 4.5) {
+        const shortL0 = v11Cfg("lnShortL0", 200.0);
+        const shortTau = v11Cfg("lnShortTau", 60.0);
+        const repD0 = v11Cfg("lnRepD0", 80.0);
+        const repTau = v11Cfg("lnRepTau", 25.0);
+        for (let i = 0; i < tt.length; i += 1) {
+            const wEff = Math.max(w[i], LN_REL_W_MIN);
+            sShort[i] = wEff * sig((shortL0 - lenAvg[i]) / shortTau);
+            const d = tailGapNext[i];
+            sRePress[i] = d >= 0.0 ? wEff * sig((repD0 - d) / repTau) : 0.0;
+        }
     }
 
     // S_jack（v6）：50ms 面缝归零的连续门控（见 LN_JACK_ZERO_MS 注释）。
@@ -1798,18 +2330,101 @@ function lnEventScores(col, partnerCol, od, invRate = 1.0, density = null, other
         }
     }
 
-    return { sRel, sJack, sAdj, sCross, sHold, times: tt, holdGroup, w, gaps };
+    let tailGapMed = 0.0;
+    let tailCv = 0.0;
+    if (tt.length >= 3) {
+        const gs = [];
+        for (let i = 1; i < tt.length; i += 1) gs.push(tt[i] - tt[i - 1]);
+        gs.sort((a, b) => a - b);
+        tailGapMed = gs[gs.length >> 1];
+        let mg = 0; for (const x of gs) mg += x; mg /= gs.length;
+        let vv = 0; for (const x of gs) vv += (x - mg) * (x - mg);
+        tailCv = mg > TIME_EPS ? Math.sqrt(vv / gs.length) / mg : 0.0;
+    }
+    return { sRel, sJack, sAdj, sCross, sHold, sShort, sRePress, times: tt, holdGroup, w, gaps, tailGapMed, tailCv };
 }
 
 // 全谱 LN 事件上的分位聚合（RC 同款 findNQuantile），并施以整谱折扣：
 // S_rel / S_jack × w(松手吸收) × v(时长有效性)，S_cross / S_hold × v。
+// 衩放手（fork release）逐事件分：对同手相邻三轨 (a, b, c)，b 轨每次松手时
+// 查 a、c 是否仍在保持（LN 区间覆盖该时刻 ± tol）或被按下；两轨都有 → 1，单轨 → 0.5。
+// 再乘事件长度权重 w（短条的放手压力更小），与 sAdj 的口径一致。
+function lnForkScores(lanes, laneIndex, got, tol) {
+    const nEv = got.times.length;
+    const out = new Float64Array(nEv);
+    const handOf = [];
+    let start = 0;
+    for (const hand of handLayoutOf(lanes.length)) {
+        for (const lane of hand) {
+            handOf[lane] = { hand, idx: hand.indexOf(lane) };
+        }
+        start += hand.length;
+    }
+    const info = handOf[laneIndex];
+    if (!info || info.hand.length < 3) {
+        return out;
+    }
+    const { hand, idx } = info;
+    if (idx === 0 || idx === hand.length - 1) {
+        return out;
+    }
+    const a = hand[idx - 1];
+    const c = hand[idx + 1];
+
+    const holdsA = [];
+    const tapsA = [];
+    for (const n of lanes[a] || []) {
+        if (n.len > 0) holdsA.push([n.t, n.t + n.len]);
+        else tapsA.push(n.t);
+    }
+    const holdsC = [];
+    const tapsC = [];
+    for (const n of lanes[c] || []) {
+        if (n.len > 0) holdsC.push([n.t, n.t + n.len]);
+        else tapsC.push(n.t);
+    }
+    const active = (holds, taps, t) => {
+        for (let i = 0; i < holds.length; i += 1) {
+            if (holds[i][0] - tol <= t && t <= holds[i][1] + tol) {
+                return true;
+            }
+        }
+        for (let i = 0; i < taps.length; i += 1) {
+            if (Math.abs(taps[i] - t) <= tol) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const wEff = new Float64Array(nEv);
+    for (let j = 0; j < nEv; j += 1) {
+        wEff[j] = Math.max(got.w[j], LN_REL_W_MIN);
+        const t = got.times[j];
+        const na = active(holdsA, tapsA, t) ? 1 : 0;
+        const nc = active(holdsC, tapsC, t) ? 1 : 0;
+        const f = na + nc;
+        if (f > 0) {
+            out[j] = (f === 2 ? 1.0 : 0.5) * wEff[j];
+        }
+    }
+    return out;
+}
+
 function lnStructureScores(lanes, od, invRate = 1.0, density = null) {
     const rels = [];
     const jacks = [];
+    const shorts = [];
+    const repress = [];
+    const jackEvents = [];
     const adjs = [];
     const crosses = [];
     const holdsArr = [];
     const seamSamples = [];
+    const forks = [];
+    const forkDenoms = [];
+    const relSolo = [];
+    const relLongGate = [];
     const events = [];
     const handOthers = handOthersOf(lanes.length);
     for (let i = 0; i < lanes.length; i += 1) {
@@ -1829,11 +2444,40 @@ function lnStructureScores(lanes, od, invRate = 1.0, density = null) {
         }
         const got = lnEventScores(lanes[i], partner, od, invRate, density, otherPresses);
         if (got) {
+            const forkScores = lnForkScores(lanes, i, got, LN_FORK_TOL_MS);
+            for (const v of forkScores) {
+                forks.push(v);
+            }
+            for (let j = 0; j < got.times.length; j += 1) {
+                forkDenoms.push(Math.max(got.w[j], LN_REL_W_MIN));
+            }
+            const endLen = new Map();
+            for (const n of lanes[i]) {
+                if (n.len > 0) {
+                    const key = n.t + n.len;
+                    const prev = endLen.get(key) || 0;
+                    if (n.len > prev) endLen.set(key, n.len);
+                }
+            }
+            for (let j = 0; j < got.times.length; j += 1) {
+                const tRel = got.times[j];
+                relSolo.push(tRel);
+                relLongGate.push((endLen.get(tRel) || 0) >= LN_REL_LONG_MS ? 1.0 : 0.0);
+            }
             for (const v of got.sRel) {
-                rels.push(v);
+                if (v >= 0.0) {
+                    rels.push(v);
+                }
             }
             for (const v of got.sJack) {
                 jacks.push(v);
+                jackEvents.push(v);
+            }
+            for (const v of got.sShort) {
+                shorts.push(v);
+            }
+            for (const v of got.sRePress) {
+                repress.push(v);
             }
             for (const v of got.sAdj) {
                 adjs.push(v);
@@ -1854,6 +2498,7 @@ function lnStructureScores(lanes, od, invRate = 1.0, density = null) {
                 events.push({
                     t: got.times[j],
                     rel: got.sRel[j],
+                    fork: forkScores[j],
                     jack: got.sJack[j],
                     adj: got.sAdj[j],
                     cross: got.sCross[j],
@@ -1863,14 +2508,204 @@ function lnStructureScores(lanes, od, invRate = 1.0, density = null) {
             }
         }
     }
-    const absorb = lnReleaseAbsorb(lanes, LN_ABSORB_GAIN);
-    const valid = lnHoldValidity(lanes, od);
+    // 盾（头侧）：每个 LN 头之前同轨单点越近 → 头判时机越难；长条权重 w，0.75 分位聚合。
+    let sShieldHead = 0.0;
+    {
+        const vals = [];
+        for (const col of lanes) {
+            if (col.length === 0) continue;
+            const taps = [];
+            for (const n of col) if (!(n.len > 0.0)) taps.push(n.t);
+            if (taps.length === 0) continue;
+            taps.sort((a, b) => a - b);
+            for (const h of col) {
+                if (!(h.len > 0.0)) continue;
+                // 头之前最近的单点（二分）
+                let lo = 0, hi = taps.length;
+                while (lo < hi) { const mid = (lo + hi) >> 1; if (taps[mid] <= h.t) lo = mid + 1; else hi = mid; }
+                if (lo === 0) continue;
+                const d = h.t - taps[lo - 1];
+                const head = Math.exp(-d / LN_SHIELD_HEAD_TAU);
+                if (head > 0.0) vals.push(head * Math.max(lnLenWeight(h.len, od), LN_REL_W_MIN));
+            }
+        }
+        if (vals.length > 0) sShieldHead = lnAggregate(Float64Array.from(vals));
+    }
+
+    // 松手难度（带符号，连续、任意键数）：
+    //   noAlign ：尾与其它轨的头/尾都不对齐 → 缺少节奏参照，↑
+    //   adjHold ：松开时同手邻近轨仍未松 → 需要选择性松手，↑
+    //   headPen ：尾接近其它轨的头（含反键/交错） → ↓，避免与 S_jack 重复增益
+    // 优化：用排序数组 + 二分（最近邻）替代逐事件全表扫描；保持区间用时间扫掠维护 active 集。
+    let sRelease = 0.0;
+    {
+        const vals = [];
+        const knob = (d, tau) => Math.exp(-Math.max(0.0, Math.abs(d)) / tau);
+        const nearestDist = (arr, x) => {
+            let lo = 0, hi = arr.length;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] < x) lo = mid + 1; else hi = mid; }
+            let best = Infinity;
+            if (lo < arr.length) best = Math.min(best, Math.abs(arr[lo] - x));
+            if (lo > 0) best = Math.min(best, Math.abs(arr[lo - 1] - x));
+            return best;
+        };
+        const hands = handLayoutOf(lanes.length);
+        for (const hand of hands) {
+            for (const lane of hand) {
+                const col = lanes[lane] || [];
+                if (col.length === 0) continue;
+                const oTimes = [];
+                const oEnds = [];
+                const lnHeads = [];
+                const ivStart = [];
+                const ivEnd = [];
+                for (const l2 of hand) {
+                    if (l2 === lane) continue;
+                    for (const n of lanes[l2] || []) {
+                        const end = n.len > 0.0 ? n.t + n.len : n.t;
+                        oTimes.push(n.t);
+                        oEnds.push(end);
+                        if (n.len > 0.0) { lnHeads.push(n.t); ivStart.push(n.t); ivEnd.push(end); }
+                    }
+                }
+                oTimes.sort((a, b) => a - b);
+                oEnds.sort((a, b) => a - b);
+                lnHeads.sort((a, b) => a - b);
+                const order = ivStart.map((_, idx) => idx).sort((a, b) => ivStart[a] - ivStart[b]);
+                const lnCount = ivStart.length;
+                let ptr = 0;
+                let activeEnds = [];
+                for (const h of col) {
+                    if (!(h.len > 0.0)) continue;
+                    const te = h.t + h.len;
+                    while (ptr < order.length && ivStart[order[ptr]] <= te) { activeEnds.push(ivEnd[order[ptr]]); ptr += 1; }
+                    if (activeEnds.length) {
+                        let w = 0;
+                        for (const e of activeEnds) if (e >= te) activeEnds[w++] = e;
+                        activeEnds.length = w;
+                    }
+                    let align = 0.0;
+                    let headPen = 0.0;
+                    if (oTimes.length) {
+                        const dT = nearestDist(oTimes, te);
+                        const dE = nearestDist(oEnds, te);
+                        align = Math.max(knob(dT, LN_REL_ALIGN_TAU), knob(dE, LN_REL_ALIGN_TAU));
+                    }
+                    if (lnHeads.length) headPen = knob(nearestDist(lnHeads, te), LN_REL_HEAD_TAU);
+                    let holdSum = 0.0;
+                    for (const e of activeEnds) holdSum += 1.0 - knob(e - te, LN_REL_HOLD_TAU);
+                    const adjHold = lnCount > 0 ? holdSum / lnCount : 0.0;
+                    const noAlign = 1.0 - align;
+                    const floorW = v11Cfg("lnRelFloor", LN_REL_FLOOR);
+                    const raw = floorW + (1.0 - floorW) * noAlign + adjHold - LN_REL_HEAD_PEN * headPen;
+                    vals.push(Math.max(0.0, raw) * Math.max(lnLenWeight(h.len, od), LN_REL_W_MIN));
+                }
+            }
+        }
+        if (vals.length > 0) sRelease = Math.max(0.0, lnAggregate(Float64Array.from(vals)));
+    }
+    // 释放难度层：对每个释放事件，取与「其它键起音」的最近距离；
+    // 长条释放且距离 > LN_REL_SOLO_MS 视为孤立释放（占比）。
+    let sRelLayer = 0.0;
+    if (relSolo.length > 0 && lnHandMaxLen(lanes) >= 3) {
+        const onsets = [];
+        for (const lane of lanes) {
+            for (const n of lane) {
+                onsets.push(n.t);
+            }
+        }
+        onsets.sort((a, b) => a - b);
+        const holdsAll = [];
+        for (const lane of lanes) {
+            for (const n of lane) {
+                if (n.len > 0) holdsAll.push(n);
+            }
+        }
+        let acc = 0.0;
+        let cnt = 0;
+        for (let idx = 0; idx < relSolo.length; idx += 1) {
+            const t = relSolo[idx];
+            // 最近起音距离（忽略恰好等于 t 的本轨释放，取严格相邻的两个起音点）
+            let lo = 0;
+            let hi = onsets.length - 1;
+            while (lo < hi) {
+                const mid = (lo + hi) >> 1;
+                if (onsets[mid] < t) lo = mid + 1;
+                else hi = mid;
+            }
+            let d = Infinity;
+            for (let sh = -2; sh <= 2; sh += 1) {
+                const kk = lo + sh;
+                if (kk < 0 || kk >= onsets.length) continue;
+                const dd = Math.abs(onsets[kk] - t);
+                if (dd > 1e-9 && dd < d) d = dd;
+            }
+            const longGate = idx < relLongGate.length ? relLongGate[idx] : 0;
+            if (Number.isFinite(d)) {
+                acc += (d > LN_REL_SOLO_MS ? 1.0 : 0.0) * longGate;
+                cnt += 1;
+            }
+        }
+        sRelLayer = cnt > 0 ? acc / cnt : 0.0;
+    }
+    // 盾键（LN × RC 交集）：LN 保持期间同手相邻轨出现单点（严格位于保持区间内部），
+    // 按长条长度权重 w 加权得到「带盾长条占比」。4K 相邻轨即配对轨；6K/7K 为手内相邻键位。
+    let sShieldSum = 0.0;
+    {
+        const hands = handLayoutOf(lanes.length);
+        let num = 0.0;
+        let den = 0.0;
+        for (const hand of hands) {
+            if (hand.length < 2) continue;
+            for (let hp = 0; hp < hand.length; hp += 1) {
+                const laneHolds = (lanes[hand[hp]] || []).filter((n) => n.len > 0.0);
+                if (laneHolds.length === 0) continue;
+                const adjTaps = [];
+                for (const dl of [-1, 1]) {
+                    const np = hp + dl;
+                    if (np < 0 || np >= hand.length) continue;
+                    for (const n of lanes[hand[np]] || []) {
+                        if (!(n.len > 0.0)) adjTaps.push(n.t);
+                    }
+                }
+                if (adjTaps.length === 0) continue;
+                for (const h of laneHolds) {
+                    const wgt = Math.max(lnLenWeight(h.len, od), LN_REL_W_MIN);
+                    den += wgt;
+                    const inLo = h.t + LN_SHIELD_TOL_MS;
+                    const inHi = h.t + h.len - LN_SHIELD_TOL_MS;
+                    let hit = false;
+                    for (const tapT of adjTaps) {
+                        if (tapT > inLo && tapT < inHi) {
+                            hit = true;
+                            break;
+                        }
+                    }
+                    if (hit) num += wgt;
+                }
+            }
+        }
+        sShieldSum = den > 0.0 ? num / den : 0.0;
+    }
+    const absorb = lnReleaseAbsorb(lanes, v11Cfg("lnAbsorbGain", LN_ABSORB_GAIN));
+    const lnValidForce = v11Cfg("lnValidForce", -1.0);
+    const valid = lnValidForce >= 0.0 ? lnValidForce : lnHoldValidity(lanes, od);
     return {
-        sRel: lnAggregate(rels) * absorb * valid,
+        sRel: lnAggregateAt(rels, v11Cfg("lnRelQ", LN_AGG_QUANTILE)) * absorb * valid,
+        sShort: lnAggregate(Float64Array.from(shorts)) * valid,
+        sRePress: lnAggregate(Float64Array.from(repress)) * valid,
         sJack: lnAggregate(jacks) * absorb * valid,
+        sJackEvents: jackEvents,
         sAdj: lnAggregate(adjs) * absorb * valid,
         sCross: lnAggregate(crosses) * valid,
         sHold: lnAggregate(holdsArr) * valid,
+        // 衩（fork）松手结构分：逐事件 fork 权重（1/0.5 × w）的 0.75 分位。
+        // 稀疏项用分位聚合与其它 S 项同口径；只有较大比例事件是衩时该项才明显抬升。
+        sFork: lnAggregate(forks) * valid,
+        sRelLayer: sRelLayer * valid,
+        sShield: sShieldSum * valid,
+        sShieldHead: sShieldHead * valid,
+        sRelease: sRelease * valid,
         seamReg: lnAggregate(seamSamples) * valid,
         events,
         absorb,
@@ -1890,7 +2725,7 @@ function lnOwnQuantileN(lanes, od, invRate = 1.0, density = null) {
             continue;
         }
         for (let j = 0; j < got.sRel.length; j += 1) {
-            vals.push(LN_MULT_REL * got.sRel[j] + LN_MULT_JACK * got.sJack[j]
+            vals.push(LN_MULT_REL * got.sRel[j] + v11Cfg("lnJack", LN_MULT_JACK) * got.sJack[j]
                 + LN_MULT_ADJ * got.sAdj[j] + LN_MULT_CROSS * got.sCross[j]);
         }
     }
@@ -1998,14 +2833,33 @@ function lnMultiplier(lanes, od, rate, density = null) {
     }
     const invRate = 1.0 / rate;
     const structure = lnStructureScores(lanes, od, invRate, density);
-    const { sRel, sJack, sAdj, sCross, sHold, events, absorb, valid } = structure;
-    const total = LN_MULT_REL * (sRel * rate)
-        + LN_MULT_JACK * (sJack * rate)
-        + LN_MULT_ADJ * (sAdj * rate)
+    const { sRel, sJack, sAdj, sCross, sHold, sFork, events, absorb, valid } = structure;
+    const gammaFork = v11Cfg("lnFork", LN_MULT_FORK);
+    const gammaJack = v11Cfg(`lnJack${lanes.length}`, v11Cfg("lnJack", LN_MULT_JACK_BY_KEY[lanes.length] ?? LN_MULT_JACK));
+    const gammaRel = v11Cfg(`lnRel${lanes.length}`, v11Cfg("lnRel", LN_MULT_REL_BY_KEY[lanes.length] ?? LN_MULT_REL));
+    const gammaHold = v11Cfg("lnHold", LN_MULT_HOLD);
+    const gammaAdj = v11Cfg("lnAdj", LN_MULT_ADJ);
+    const gammaShort = v11Cfg("lnShort", 0.0);
+    const gammaRepress = v11Cfg("lnRepress", 0.0);
+    const gammaRelLayer = v11Cfg("relLayer", 3.0) * (lnHandMaxLen(lanes) >= 3 ? 1.0 : 0.0);
+    const gammaShield = v11Cfg("lnShield", LN_SHIELD_W[lanes.length] || 0.0);
+    const total = gammaRel * (sRel * rate)
+        + gammaJack * (sJack * rate)
+        + gammaAdj * (sAdj * rate)
         + LN_MULT_CROSS * sCross
-        + LN_MULT_HOLD * sHold;
+        + gammaHold * sHold
+        + gammaFork * sFork
+        + gammaRelLayer * (structure.sRelLayer || 0.0)
+        + gammaShield * (structure.sShield || 0.0)
+        + gammaShort * (structure.sShort || 0.0)
+        + gammaRepress * (structure.sRePress || 0.0);
     const factor = lnRhoCurve(rho, LN_MULT_EXP, LN_MULT_RHO_C, LN_MULT_RHO_LIN);
     const seamPenalty = 1.0 - LN_SEAM_DISCOUNT * structure.seamReg;
+    if (typeof globalThis !== 'undefined' && globalThis.__RC_DEBUG_LN && typeof globalThis.__RC_DEBUG_LN === 'object') {
+        globalThis.__RC_DEBUG_LN.sFork = sFork;
+        globalThis.__RC_DEBUG_LN.sRelLayer = structure.sRelLayer || 0.0;
+        globalThis.__RC_DEBUG_LN.forkTotal = total;
+    }
     const totalSeam = total * seamPenalty;
     return {
         k: totalSeam < 0.0 ? 0.0 : factor * totalSeam,
@@ -2013,6 +2867,14 @@ function lnMultiplier(lanes, od, rate, density = null) {
         factor,
         absorb,
         valid,
+        parts: {
+            rho, factor, sRel, sJack, sAdj, sCross, sHold, sFork,
+            sRelLayer: structure.sRelLayer || 0.0, sShield: structure.sShield || 0.0,
+            sJackEvents: structure.sJackEvents || [],
+            sShieldHead: structure.sShieldHead || 0.0, sRelease: structure.sRelease || 0.0,
+            sShort: structure.sShort || 0.0, sRePress: structure.sRePress || 0.0,
+            seamPenalty, gammaFork, gammaRelLayer, gammaShield, gammaJack, gammaRel, gammaHold, gammaAdj,
+        },
     };
 }
 
@@ -2119,13 +2981,69 @@ const RC10_JACK_MS = 250.0;
 const RC10_EXP_CLIP = 2.0;
 const RC10_INTERCEPT = -0.3170;
 const RC10_BETA = [0.0000, 0.0000, 0.0000, -0.0375, 0.0000, 0.0000, 0.0000];
+// 逐键 β（可用环境变量覆盖：MM_RC10_BETA_6K='[...]'；浏览器环境无 process，自动跳过）
+const RC10_BETA_BY_KEY = (() => {
+    const out = {};
+    if (typeof process !== "undefined" && process.env) {
+        for (const kk of [4, 5, 6, 7, 8, 9, 10]) {
+            const raw = process.env[`MM_RC10_BETA_${kk}K`];
+            if (!raw) continue;
+            try {
+                const v = JSON.parse(raw);
+                if (Array.isArray(v) && v.length === 7) out[kk] = v;
+            } catch (e) { /* ignore */ }
+        }
+    }
+    globalThis.__RC10_BETA_BY_KEY = out;
+    return out;
+})();
 const RC10_FEAT_MEAN = [0.398, 0.281, 0.732, 0.833, 0.753, 0.142, 0.163];
 const RC10_FEAT_SCALE = [0.144, 0.260, 0.216, 0.245, 0.224, 0.226, 0.210];
 
+const RC10_BETA_6K_CAL = [0.000, 0.064, 0.000, 0.032, 0.064, -0.120, 0.000];
+const RC10_GATE_6K = [0.30, 0.65];
+const RC10_BETA_7K_CAL = [0.000, 0.064, 0.000, 0.032, 0.064, -0.120, 0.000];
+const RC10_GATE_7K = [0.30, 0.65];
+const RC_END_BETA = (() => {
+    const out = { 4: 0.0, 6: 0.0, 7: 0.0 };
+    if (typeof process !== "undefined" && process.env && process.env.MM_RC_END_BETA) {
+        try {
+            const v = JSON.parse(process.env.MM_RC_END_BETA);
+            for (const k of Object.keys(v)) out[k] = Number(v[k]) || 0.0;
+        } catch (e) { /* ignore */ }
+    }
+    return out;
+})(); // 耐力层逐键系数（0 = 关闭）
+const RC_END_GBETA = (() => {
+    const out = { 4: 0.35, 6: 0.3, 7: 0.5 };
+    if (typeof process !== "undefined" && process.env && process.env.MM_RC_END_GBETA) {
+        try { const v = JSON.parse(process.env.MM_RC_END_GBETA); for (const k of Object.keys(v)) out[k] = Number(v[k]) || 0.0; } catch (e) { /* ignore */ }
+    }
+    return out;
+})(); // 谱面级耐力项：gPred += beta·ln(1+E_q75)
+const RC_END_SIGMA = (() => {
+    const env = (typeof process !== "undefined" && process.env && process.env.MM_RC_END_SIGMA) ? Number(process.env.MM_RC_END_SIGMA) : NaN;
+    return Number.isFinite(env) && env > 0 ? env : 1.0;
+})(); // 对数难度差 σ（相对变化 ~35% 视为不同难度段）
+const RC_END_RESET_K = 3.0;    // 难度突变时的指数衰减系数（越大越"骤降"）
+const RC_END_TAU_MS = 600.0;   // 断档后的衰减时间常数
+const RC_END_GAP_MS = 200.0;   // 正常行间隔（≤ 该值不额外衰减）
+const RC_END_DT_CAP_MS = 600.0;// 单行最多计入的时长
+const RC_END_WIN_MS = 2000.0; // 轨内 nps 统计窗口
+const RC_END_EMA_MS = (() => {
+    const env = (typeof process !== "undefined" && process.env && process.env.MM_RC_END_EMA) ? Number(process.env.MM_RC_END_EMA) : NaN;
+    return Number.isFinite(env) && env > 0 ? env : 3000.0;
+})(); // 难度基线 EMA 时间常数（消除行间抖动，只对真实段落变化重置）
+const RC_END_T0_MS = (() => {
+    const env = (typeof process !== "undefined" && process.env && process.env.MM_RC_END_T0) ? Number(process.env.MM_RC_END_T0) : NaN;
+    return Number.isFinite(env) && env > 0 ? env : 30000.0;
+})(); // 累积时间尺度（默认 30s：E 表示"连续相近难度的等效秒数/30s"）
+let RC10_LAST_K = 0;
 function rc10LocalFeatures(lanes, kTotal, mergedTimes) {
     const nOut = mergedTimes.length;
+    RC10_LAST_K = kTotal;
     if (!lanes || lanes.length === 0 || nOut === 0) return null;
-    if (kTotal !== 4 && kTotal !== 6 && kTotal !== 7) return null;
+    if (kTotal < 4) return null;
     const onsets = [];
     for (let c = 0; c < kTotal; c += 1) {
         const lane = lanes[c];
@@ -2236,9 +3154,22 @@ function rc10LocalMultiplier(feat) {
     for (let k = 0; k < n; k += 1) {
         let z = v11Cfg("intercept", RC10_INTERCEPT);
         for (let q = 0; q < 7; q += 1) {
-            if (RC10_BETA[q] !== 0.0) {
+            const kNow = RC10_LAST_K;
+            const betaArr = RC10_BETA_BY_KEY[kNow] || (kNow === 6 ? RC10_BETA_6K_CAL : (kNow === 7 ? RC10_BETA_7K_CAL : RC10_BETA));
+            const betaQ = v11Cfg(`rc10Beta${kNow}_${q}`, v11Cfg(`rc10Beta${q}`, betaArr[q]));
+            if (betaQ !== 0.0) {
+                const gateDef = (kNow === 6) ? RC10_GATE_6K : (kNow === 7 ? RC10_GATE_7K : [-1.0, -1.0]);
+                const gLo = v11Cfg("rc10GateLo", gateDef[0]);
+                const gHi = v11Cfg("rc10GateHi", gateDef[1]);
+                let gate = 1.0;
+                const gateFeats = v11Cfg("rc10GateFeats", ((kNow === 6 || kNow === 7) ? "0,5" : ""));
+                if (gLo >= 0.0 && String(gateFeats).split(",").includes(String(q))) {
+                    const ov = feat[5][k];
+                    const tt = Math.max(0.0, Math.min(1.0, (ov - gLo) / Math.max(1e-6, gHi - gLo)));
+                    gate = tt * tt * (3.0 - 2.0 * tt);
+                }
                 const scale = Math.max(RC10_FEAT_SCALE[q], 1e-6);
-                z += RC10_BETA[q] * (feat[q][k] - RC10_FEAT_MEAN[q]) / scale;
+                z += gate * betaQ * (feat[q][k] - RC10_FEAT_MEAN[q]) / scale;
             }
         }
         const zc = Math.max(-RC10_EXP_CLIP, Math.min(RC10_EXP_CLIP, z));
@@ -2267,7 +3198,7 @@ function rcRotSmoothstep(t) {
 }
 
 function rcRotDiscount(lanes, kTotal, mergedTimes) {
-    if (kTotal !== 4 || !lanes || lanes.length === 0 || mergedTimes.length === 0) return null;
+    if (kTotal < 4 || !lanes || lanes.length === 0 || mergedTimes.length === 0) return null;
     const onsets = [];
     for (let c = 0; c < kTotal; c += 1) {
         const lane = lanes[c];
@@ -2362,6 +3293,159 @@ function rcRotDiscount(lanes, kTotal, mergedTimes) {
     return out;
 }
 
+// ---- RC v14：叠内挖空（抬指/换指）修正（4K/6K/7K 通用，连续量）----
+// 物理背景：满叠/中叠谱里「平拍」与「挖空」相邻时，音轨集会变化，手指必须抬起再按下
+// （或换到相邻轨）；快速叠流里这比纯平拍更费手。旧模型只看行内押数，于是
+//   4343（4↔3 交替）、4242（1234↔14）、3333（124↔134）都会被判低。
+// 本层不判键型，只用连续物理量：
+//   1) 相邻两行的「换指量」z = |A_{k−1} Δ A_k| / kTotal（对称差 / 键数）：
+//      平拍 0；4343（同一轨抬落）1/k；4242 或 3333（两轨换位）2/k；按比例连续。
+//   2) 满叠度 fill = (c_{k−1} + c_k) / (2·kTotal)：只有接近满叠的叠流里，换指才意味着
+//      「抬指再重按」；普通 jumpstream 的换轨被连续门控压低。
+//   3) 局部行速率（行/秒）与满叠度都用连续 smoothstep，无分段硬阈值。
+// 行值乘 exp(delta · sRate · sFill · z)，沿时间高斯平滑。
+// 4K/6K/7K 共用同一公式与常量（z 归一化到 kTotal）；LN 通道不经过本层。
+const RC_HOLLOW_LO_RPS = 5.0568; // 行速率上升段起点（行/秒）
+const RC_HOLLOW_HI_RPS = 9.1800; // 行速率上升段终点（峰值区开始）
+const RC_HOLLOW_DOWN_LO_RPS = 11.7600; // 行速率衰减段起点（密度再高时抬指被判定窗吞掉）
+const RC_HOLLOW_DOWN_HI_RPS = 16.8642; // 行速率衰减段终点（此后不再修正）
+const RC_HOLLOW_DELTA = 0.2910; // 标定：_analysis/hollow_calib3.py（4K 映射层同步重拟合） // 乘在换指量 z 上的增益（log 空间；标定见 _analysis/hollow_calib2.py）
+const RC_HOLLOW_FILL_LO = 0.5610; // 满叠度门控下界
+const RC_HOLLOW_FILL_HI = 1.0000; // 满叠度门控上界
+const RC_HOLLOW_WIN = 4; // 行速率统计窗口（±行数）
+const RC_HOLLOW_REACH_MS = 47.0755; // 沿时间平滑半径
+const RC_HOLLOW_BAL_MIX = 1.0000; // 缺轨轮换（非同轨挖空）相对固定缺轨的削减比例
+
+function rcHollowMultFn(lanes, kTotal, mergedTimes) {
+    if (!(kTotal >= 4) || !lanes || lanes.length === 0 || mergedTimes.length === 0) return null;
+    const onsets = [];
+    for (let c = 0; c < kTotal; c += 1) {
+        const lane = lanes[c];
+        if (!lane) continue;
+        for (let i = 0; i < lane.length; i += 1) onsets.push([lane[i].t, c]);
+    }
+    if (onsets.length < 6) return null;
+    onsets.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+    const rowTimes = [];
+    const rowCols = [];
+    let curT = onsets[0][0];
+    let curCols = [onsets[0][1]];
+    for (let i = 1; i < onsets.length; i += 1) {
+        const t = onsets[i][0];
+        const c = onsets[i][1];
+        if (Math.abs(t - curT) <= 1e-6) curCols.push(c);
+        else { rowTimes.push(curT); rowCols.push(curCols); curT = t; curCols = [c]; }
+    }
+    rowTimes.push(curT);
+    rowCols.push(curCols);
+    const nRows = rowTimes.length;
+    if (nRows < 2) return null;
+
+    const loRps = v11Cfg("hollowLo", RC_HOLLOW_LO_RPS);
+    const hiRps = v11Cfg("hollowHi", RC_HOLLOW_HI_RPS);
+    const delta = v11Cfg("hollow", RC_HOLLOW_DELTA);
+    const fillLo = v11Cfg("hollowFillLo", RC_HOLLOW_FILL_LO);
+    const fillHi = v11Cfg("hollowFillHi", RC_HOLLOW_FILL_HI);
+    const win = Math.max(1, Math.round(v11Cfg("hollowWin", RC_HOLLOW_WIN)));
+    const reach = v11Cfg("hollowReach", RC_HOLLOW_REACH_MS);
+    // 逐行「音轨集变化量」d（对称差 / 键数，连续、与键数无关）
+    const dArr = new Float64Array(nRows);
+    for (let k = 1; k < nRows; k += 1) {
+        const a = rowCols[k - 1];
+        const b = rowCols[k];
+        let inter = 0;
+        for (const c of b) if (a.includes(c)) inter += 1;
+        dArr[k] = (a.length + b.length - 2 * inter) / kTotal;
+    }
+    const raw = new Float64Array(nRows);
+    for (let k = 1; k < nRows; k += 1) {
+        const a = rowCols[k - 1];
+        const b = rowCols[k];
+        // 换指量本身（对称差 / 键数），连续、与键数无关；持续性由窗口占比门控
+        const z = dArr[k];
+        // 满叠度：两行里较大押数 / 键数（4242 需要 4 键行参与才算「叠」）
+        const fill = Math.max(a.length, b.length) / kTotal;
+        const sFill = rcRotSmoothstep((fill - fillLo) / Math.max(1e-6, fillHi - fillLo));
+        // 局部行速率（±win 行窗口）
+        const b0 = Math.max(0, k - win);
+        const b1 = Math.min(nRows - 1, k + win);
+        const span = rowTimes[b1] - rowTimes[b0];
+        const rps = (b1 > b0 && span > 1e-6) ? ((b1 - b0) * 1000.0) / span : 0.0;
+        const dlo = v11Cfg("hollowDownLo", RC_HOLLOW_DOWN_LO_RPS);
+        const dhi = v11Cfg("hollowDownHi", RC_HOLLOW_DOWN_HI_RPS);
+        const sRateUp = rcRotSmoothstep((rps - loRps) / Math.max(1e-6, hiRps - loRps));
+        const sRateDown = 1.0 - rcRotSmoothstep((rps - dlo) / Math.max(1e-6, dhi - dlo));
+        const sRate = sRateUp * sRateDown;
+        // 持续性：窗口内「周期 2 的挖空/换指」占比（连续）：
+        //   本排押数与两排前相同（4→3→4 / 3→3 / 4→2→4 都满足），且音轨集相对上一排在变。
+        //   偶发缺一轨、或和弦升级/降级的一次性变化都只贡献很小占比。
+        let altShare = 0.0;
+        let altCnt = 0;
+        for (let j = Math.max(1, k - win); j <= Math.min(nRows - 1, k + win); j += 1) {
+            altCnt += 1;
+            if (j >= 2) {
+                const cj = rowCols[j].length;
+                const cj2 = rowCols[j - 2].length;
+                const sizeSame = Math.max(0.0, 1.0 - Math.abs(cj - cj2) / Math.max(1, cj2));
+                altShare += sizeSame * Math.min(1.0, dArr[j] / 0.25);
+            }
+        }
+        altShare = altCnt > 0 ? altShare / altCnt : 0.0;
+        const altLo = v11Cfg("hollowAltLo", 0.9500);
+        const altHi = v11Cfg("hollowAltHi", 1.0000);
+        const sAlt = rcRotSmoothstep((altShare - altLo) / Math.max(1e-6, altHi - altLo));
+        // 同轨挖空平衡：缺轨在相邻两次挖空之间是否相同。
+        // 同一轨反复抬落（如 (1234)(123) 固定缺 4 轨）最难；缺轨轮换（(1234)(123)(1234)(124)）
+        // 手指可在两轨间交替，实际更简单 —— 用缺轨集对称差连续加权。
+        let bal = 1.0;
+        if (k >= 2) {
+            let holeSame = 0;
+            let holeDiff = 0;
+            for (let c = 0; c < kTotal; c += 1) {
+                const inA = b.includes(c);
+                const inB = rowCols[k - 2].includes(c);
+                if (!inA && !inB) holeSame += 1;
+                else if (inA !== inB) holeDiff += 1;
+            }
+            const sameHole = holeDiff + holeSame > 0 ? holeSame / (holeSame + holeDiff) : 1.0;
+            // 行速率越高，抬指越可能被判定窗吞掉 → 轮换缺轨的「更简单」优势衰减，甚至反转
+            const balLo = v11Cfg("hollowBalLo", 11.0);
+            const balHi = v11Cfg("hollowBalHi", 15.0);
+            const balGain = v11Cfg("hollowBalGain", 3.0);
+            const downFrac = rcRotSmoothstep((rps - balLo) / Math.max(1e-6, balHi - balLo));
+            const mixEff = v11Cfg("hollowBalMix", RC_HOLLOW_BAL_MIX) * (1.0 - balGain * downFrac);
+            bal = 1.0 - mixEff * (1.0 - sameHole);
+        }
+        raw[k] = delta * sRate * sFill * sAlt * bal * z;
+    }
+    // 沿时间高斯平滑并映射到合并行（同刻/邻刻加权，避免边界硬跳变）
+    const out = new Float64Array(mergedTimes.length);
+    let ptr = 0;
+    for (let j = 0; j < mergedTimes.length; j += 1) {
+        const t = mergedTimes[j];
+        while (ptr + 1 < nRows && Math.abs(rowTimes[ptr + 1] - t) <= Math.abs(rowTimes[ptr] - t)) ptr += 1;
+        let wsum = 0.0;
+        let acc = 0.0;
+        for (let k = ptr; k >= 0; k -= 1) {
+            const dt = t - rowTimes[k];
+            if (dt > reach) break;
+            const w = Math.exp(-0.5 * (dt / reach) * (dt / reach));
+            acc += w * raw[k];
+            wsum += w;
+        }
+        for (let k = ptr + 1; k < nRows; k += 1) {
+            const dt = rowTimes[k] - t;
+            if (dt > reach) break;
+            const w = Math.exp(-0.5 * (dt / reach) * (dt / reach));
+            acc += w * raw[k];
+            wsum += w;
+        }
+        out[j] = wsum > 0.0 ? Math.exp(acc / wsum) : 1.0;
+    }
+    if (globalThis.__RC_HOLLOW_DEBUG) globalThis.__RC_DEBUG_HOLLOW = out;
+    return out;
+}
+
 export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     const parsed = resolveParsed(source, options?.cvtFlag ?? null);
     if (parsed?.status === "NotMania") {
@@ -2374,7 +3458,7 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     const rawLanes = collectLanes(parsed);
     const kTotal = rawLanes.length;
     if (kTotal < 1) {
-        return { rcValue: Number.NaN, lnValue: Number.NaN, rcSequence: null, lnSequence: null, rcTicks: [], lnTicks: [] };
+        return { rcValue: Number.NaN, lnValue: Number.NaN, rcSequence: null, lnSequence: null, rcTicks: [], lnTicks: [], overlaps: { rc: [], ln: [], total: 0 } };
     }
 
     // LN 长度门 / 判定窗依赖 OD；缺失（<0）时回退 8.0（与 benchmark 一致）。
@@ -2388,23 +3472,28 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         ? rawLanes
         : rawLanes.map((lane) => lane.map((n) => ({ t: n.t * invRate, len: n.len * invRate })));
 
-    let noteCount = 0;
     const onsetSet = new Set();
     for (const lane of lanes) {
-        noteCount += lane.length;
         for (const n of lane) {
             onsetSet.add(n.t);
         }
     }
     const allOnsets = Array.from(onsetSet).sort((a, b) => a - b);
     const onsetCount = allOnsets.length;
-    const chord = noteCount / Math.max(onsetCount, 1);
-    const lnN = Math.log(Math.max(noteCount, 1));
 
     const laneTimes = lanes.map((lane) => lane.map((n) => n.t));
     const laneGroups = laneTimes.map(groupLane);
+    // 重叠键（同轨同时间戳多个物件）统一按「一个物件」计入总数：
+    // 每轨的物件数 = 该轨的时间分组数。
+    let noteCount = 0;
+    for (const gs of laneGroups) noteCount += gs.length;
+    const chord = noteCount / Math.max(onsetCount, 1);
+    const lnN = Math.log(Math.max(noteCount, 1));
     const laneGroupTimes = laneGroups.map((gs) => gs.map((g) => g.t));
-    const laneGroupSizes = laneGroups.map((gs) => gs.map((g) => g.size));
+    // 同轨同时间戳的多个物件按「一个物件」计算（不再做超限替代/溢出累加），
+    // 因此组大小统一为 1；重叠情况只用于图上的红线提示（detectOverlaps）。
+    const laneGroupSizes = laneGroups.map((gs) => gs.map(() => 1));
+    const overlaps = detectOverlaps(lanes);
 
     // 6K 手内轨道布局（4K = 每手两轨；6K = 每手三轨，含 12/23 重叠配对）
     const hands = handLayoutOf(kTotal);
@@ -2510,9 +3599,13 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         return seq;
     };
 
-    // 手内合并层（仅当一手 > 2 轨，即 6K）：把 12 与 23 两条配对序列按 2-范数合并。
-    //   时刻取手内三轨并集（= 两条配对序列并集）；物件数取手内并集计数（中轨不重复计）。
-    //   合并式：v = HAND_NORM_SCALE * (v12^p + v23^p)^(1/p)，p = HAND_NORM_P = 2。
+    // 手内合并层（一手 > 2 轨，即 6K 双手 / 7K 右手）：把相邻轨配对序列（band）合并成手内序列。
+    //   时刻取手内轨道并集；物件数取手内并集计数（中轨不重复计）。
+    //   beta_1.0.7 及以前：v = HAND_NORM_SCALE * (Σ v_i^p)^(1/p)，p = 2（2-范数）。
+    //   2-范数会把「冗余的 band 数」当成独立难度叠加（√n 放大），左手 2 条 band、
+    //   右手 3 条 band 时右手被系统性抬高。beta_1.1.1 起 RC 改用 hand-size 中性的
+    //   算术平均 HAND_MERGE_MODE="mean"（Σv/n，与 band 数无关）。
+    //   LN 基准仍按旧 2-范数密度标定，故同时算出旧 p2 序列，专供 LN 密度使用。
     const mergeHandBands = (hand, bands) => {
         let handTimes = laneGroupTimes[hand[0]];
         let handSizes = laneGroupSizes[hand[0]];
@@ -2524,25 +3617,227 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         }
         const queryTimes = Float64Array.from(handTimes);
         const bandValues = bands.map((seq) => sampleDecay(seq, queryTimes));
-        const invP = 1.0 / HAND_NORM_P;
-        const out = [];
+        // 每行「该 band 是否有音符」：用于 active 归一（空轨/未参与该行的 band 不摊薄均值）。
+        const bandRowCounts = bands.map((seq) => {
+            const m = new Map();
+            for (const r of seq) m.set(r[0], (m.get(r[0]) || 0) + r[2]);
+            return m;
+        });
+        // 每个 band 的「两轨同时按下」时刻集合（用于 track-pair 乘积层，排除单轨经过造成的伪激活）。
+        const bandBothTimes = bands.map((_, bi) => {
+            const a = new Set(laneGroupTimes[hand[bi]].map((t) => t));
+            const b = new Set(laneGroupTimes[hand[bi + 1]].map((t) => t));
+            const out = new Set();
+            for (const t of a) if (b.has(t)) out.add(t);
+            return out;
+        });
+        const nBands = bandValues.length;
+        // 序列级 band 难度：默认取“该 band 有音符的行”的均值；
+        // pairprod 模式取“两轨同时按下”的行（track-pair 的真实使用强度）。
+        const bandLevel = [];
+        const useBoth = (typeof globalThis !== 'undefined')
+            && (globalThis.__MERGE_MODE === 'pairprod' || globalThis.__MERGE_MODE === 'prodblend'
+                || globalThis.__MERGE_MODE === 'prodadd');
+        for (let bi = 0; bi < nBands; bi += 1) {
+            let acc = 0.0;
+            let cnt = 0;
+            for (let k = 0; k < queryTimes.length; k += 1) {
+                const hit = useBoth
+                    ? (bandBothTimes[bi].has(queryTimes[k]) && bandRowCounts[bi].has(queryTimes[k]))
+                    : bandRowCounts[bi].has(queryTimes[k]);
+                if (hit) {
+                    acc += bandValues[bi][k];
+                    cnt += 1;
+                }
+            }
+            bandLevel.push(cnt > 0 ? acc / cnt : 0.0);
+        }
+        // 乘积式手内合并因子（序列级）：
+        //   C = Σ_runs s·(Π_{i∈run}(1 + A_i/s) − 1)， runs = 相邻重叠 band 的最大连续段
+        //   M = C / Σ A_i  （单 band 时 M = 1）
+        let prodFactor = 1.0;
+        if (typeof globalThis !== 'undefined') globalThis.__PROD_DBG = { bandLevel: [], factor: 1.0 };
+        if (nBands > 1) {
+            let sSum = 0.0;
+            let sCnt = 0;
+            let aSum = 0.0;
+            for (let bi = 0; bi < nBands; bi += 1) {
+                if (bandLevel[bi] > 0.0) {
+                    sSum += bandLevel[bi];
+                    sCnt += 1;
+                }
+                aSum += bandLevel[bi];
+            }
+            if (sCnt > 1 && aSum > 0.0) {
+                const sRef = sSum / sCnt;
+                let c = 0.0;
+                let runStart = 0;
+                for (let q = 1; q <= nBands; q += 1) {
+                    if (q === nBands || bandLevel[q] <= 0.0 || bandLevel[q - 1] <= 0.0) {
+                        let prod = 1.0;
+                        let runSum = 0.0;
+                        for (let r = runStart; r < q; r += 1) {
+                            prod *= (1.0 + bandLevel[r] / sRef);
+                            runSum += bandLevel[r];
+                        }
+                        c += (runSum > 0.0) ? sRef * (prod - 1.0) : 0.0;
+                        runStart = q;
+                    }
+                }
+                prodFactor = c / aSum;
+                if (typeof globalThis !== 'undefined' && globalThis.__PROD_DBG) {
+                    globalThis.__PROD_DBG.bandLevel = bandLevel.slice();
+                    globalThis.__PROD_DBG.factor = prodFactor;
+                }
+            }
+        }
+        const g = (typeof globalThis !== 'undefined') ? globalThis : null;
+        const mode = (g && typeof g.__MERGE_MODE === 'string') ? g.__MERGE_MODE : HAND_MERGE_MODE;
+        const p = (g && Number.isFinite(g.__MERGE_P)) ? g.__MERGE_P : HAND_NORM_P;
+        const scale = (g && Number.isFinite(g.__MERGE_SCALE)) ? g.__MERGE_SCALE : HAND_MERGE_SCALE;
+        const bothW = (g && Number.isFinite(g.__MERGE_BOTH)) ? g.__MERGE_BOTH : HAND_MERGE_BOTH;
+        const invP = 1.0 / p;
+        const main = [];
+        const p2 = [];
+        // 密度越高，和弦尺寸/形状差异越容易被“手速”抹平（与 4K 对拍-平拍在高密度收敛同构）。
+        let firstT = 0.0;
+        let lastT = 0.0;
+        let rowCnt = 0;
+        for (let k = 0; k < handSizes.length; k += 1) {
+            if (handSizes[k] > 0) {
+                const t = queryTimes[k];
+                if (rowCnt === 0) firstT = t;
+                lastT = t;
+                rowCnt += 1;
+            }
+        }
+        const handRps = (rowCnt > 1 && lastT > firstT) ? (rowCnt - 1) / ((lastT - firstT) / 1000.0) : 0.0;
+        const altT = Math.min(1.0, Math.max(0.0, (handRps - 8.0) / 12.0));
+        const altFade = 1.0 - altT * altT * (3.0 - 2.0 * altT);
+        const chordAlt = (Number.isFinite(MERGE_CHORD_ALT) && nBands > 1 && kTotal >= 7) ? MERGE_CHORD_ALT * altFade : 0.0;
         for (let k = 0; k < queryTimes.length; k += 1) {
             const c = handSizes[k];
             if (!(c > 0)) {
                 continue;
             }
-            let acc = 0.0;
-            for (const vals of bandValues) {
-                acc += Math.pow(vals[k], HAND_NORM_P);
+            const cPrev = (k > 0 && handSizes[k - 1] > 0) ? handSizes[k - 1] : c;
+            const dSize = Math.abs(c - cPrev);
+            const altW = dSize >= 3 ? 1.0 : (dSize === 2 ? 0.8 : (dSize === 1 ? 0.0 : 0.0));
+            const altGain = 1.0 + chordAlt * altW;
+            let v = 0.0;
+            if (mode === 'pnorm' || mode === 'rms') {
+                let acc = 0.0;
+                for (const vals of bandValues) {
+                    acc += Math.pow(Math.max(vals[k], 0.0), p);
+                }
+                v = Math.pow(acc, invP) * (mode === 'rms' ? Math.pow(1.0 / nBands, invP) : 1.0);
+            } else if (mode === 'mean' || mode === 'prodfac' || mode === 'prodactive' || mode === 'pairprod' || mode === 'prodblend' || mode === 'prodadd') {
+                let acc = 0.0;
+                if (mode === 'prodactive' || mode === 'pairprod' || mode === 'prodblend') {
+                    // 只对本行有键的 band 取均值（消除空轨/手宽稀释），再乘序列级乘积因子。
+                    let act = 0;
+                    for (let bi = 0; bi < nBands; bi += 1) {
+                        if (bandRowCounts[bi].has(queryTimes[k])) {
+                            acc += bandValues[bi][k];
+                            act += 1;
+                        }
+                    }
+                    v = act > 0 ? (acc / act) * prodFactor : 0.0;
+                } else {
+                    for (const vals of bandValues) acc += vals[k];
+                    v = (acc / nBands) * (mode === 'prodfac' ? prodFactor : 1.0);
+                }
+                if (mode === 'prodblend' || mode === 'prodadd') {
+                    const lam = (typeof globalThis !== 'undefined' && Number.isFinite(globalThis.__MERGE_LAMBDA))
+                        ? globalThis.__MERGE_LAMBDA
+                        : (Number.isFinite(MERGE_LAMBDA_BY_KEY[kTotal]) ? MERGE_LAMBDA_BY_KEY[kTotal] : MERGE_BLEND_LAMBDA);
+                    v *= 1.0 + lam * Math.log(Math.max(prodFactor, 1e-6));
+                }
+            } else if (mode === 'active' || mode === 'activesum') {
+                // 只对「本行实际有键」的 band 求和：消除手宽/空轨带来的 1/nBands 稀释。
+                let acc = 0.0;
+                let act = 0;
+                for (let bi = 0; bi < nBands; bi += 1) {
+                    if (bandRowCounts[bi].has(queryTimes[k])) {
+                        acc += bandValues[bi][k];
+                        act += 1;
+                    }
+                }
+                if (act === 0) {
+                    for (const vals of bandValues) acc += vals[k];
+                    act = nBands;
+                }
+                v = (mode === 'activesum' ? acc : acc / act);
+                if (mode === 'activesum') v = acc / Math.max(1.0, Math.sqrt(act));
+            } else if (mode === 'product') {
+                // 乘积式手内合并：把「有键的 band」按相邻重叠关系分组，组内做
+                //   v_grp = s·(Π (1 + v_i/s) − 1)  （单 band 时退化为 v_i，天然 ≥1 下界再减 1）
+                // 组间相加。相邻两 band（共享一轨，如 12/23）落在同一组 → 相互放大；
+                // 相距较远的 band（如 12/34）落在不同组 → 近似线性叠加，稍简单。
+                const actIdx = [];
+                const actVal = [];
+                for (let bi = 0; bi < nBands; bi += 1) {
+                    if (bandRowCounts[bi].has(queryTimes[k])) {
+                        actIdx.push(bi);
+                        actVal.push(bandValues[bi][k]);
+                    }
+                }
+                if (actIdx.length === 0) {
+                    for (const vals of bandValues) { v += vals[k]; }
+                    v /= nBands;
+                } else if (actIdx.length === 1) {
+                    v = actVal[0];
+                } else {
+                    let acc = 0.0;
+                    for (const x of actVal) acc += x;
+                    const sRef = Math.max(acc / actVal.length, 1e-9);
+                    let runStart = 0;
+                    for (let q = 1; q <= actIdx.length; q += 1) {
+                        if (q === actIdx.length || actIdx[q] !== actIdx[q - 1] + 1) {
+                            // [runStart, q) 是一个相邻重叠组
+                            let prod = 1.0;
+                            for (let r = runStart; r < q; r += 1) prod *= (1.0 + actVal[r] / sRef);
+                            v += sRef * (prod - 1.0);
+                            runStart = q;
+                        }
+                    }
+                }
+            } else if (mode === 'max') {
+                let m = 0.0;
+                for (const vals of bandValues) m = Math.max(m, vals[k]);
+                v = m;
+            } else {
+                // softmax 链：逐条 band 用 mergeOp 合并，尺度不随 band 数放大
+                v = bandValues[0][k];
+                for (let bi = 1; bi < nBands; bi += 1) v = mergeOp(v, bandValues[bi][k]);
+                if (bothW !== 0.0 && nBands > 1) {
+                    let mn = Infinity;
+                    for (const vals of bandValues) mn = Math.min(mn, vals[k]);
+                    v += bothW * mn;
+                }
             }
-            out.push([queryTimes[k], HAND_NORM_SCALE * Math.pow(acc, invP), c]);
+            main.push([queryTimes[k], scale * v * altGain, c]);
+            // 旧 2-范数（LN 密度锚定用；与 1.0.7 的 RC 手内合并同式）
+            let acc2 = 0.0;
+            for (const vals of bandValues) acc2 += vals[k] * vals[k];
+            p2.push([queryTimes[k], Math.sqrt(acc2), c]);
         }
-        return out;
+        return { main, p2 };
     };
 
     const handSequences = [];
+    const handSequencesP2 = [];
     for (const hand of hands) {
         const bands = [];
+        // 单手只有 1 轨（1K/2K 每手 1 轨、3K 左手 1 轨）：没有相邻对，直接用该轨自身序列。
+        if (hand.length === 1) {
+            const solo = pairBandSequence(hand[0], hand[0]);
+            if (solo.length > 0) {
+                handSequences.push(solo);
+                handSequencesP2.push(solo);
+            }
+            continue;
+        }
         for (let r = 0; r + 1 < hand.length; r += 1) {
             const seq = pairBandSequence(hand[r], hand[r + 1]);
             if (seq.length > 0) {
@@ -2554,8 +3849,11 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         }
         if (bands.length === 1) {
             handSequences.push(bands[0]);
+            handSequencesP2.push(bands[0]);
         } else {
-            handSequences.push(mergeHandBands(hand, bands));
+            const mergedHand = mergeHandBands(hand, bands);
+            handSequences.push(mergedHand.main);
+            handSequencesP2.push(mergedHand.p2);
         }
     }
 
@@ -2565,14 +3863,32 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     for (const seq of handSequences) {
         mergedSeq = mergeDecaySequences(mergedSeq, seq);
     }
+    // LN 密度锚定序列：6K/7K 的 LN 基准按旧 2-范数合并标定，这里保留旧口径的
+    // 合并结果（仅作为 LN 的密度输入，RC 的数值/曲线不使用）。
+    const needP2 = (kTotal === 6 || kTotal === 7)
+        && typeof globalThis !== 'undefined' && globalThis.__MERGE_MODE !== 'pnorm'
+        && HAND_MERGE_MODE !== 'pnorm';
+    let mergedSeqP2 = mergedSeq;
+    if (needP2) {
+        mergedSeqP2 = [];
+        for (const seq of handSequencesP2) {
+            mergedSeqP2 = mergeDecaySequences(mergedSeqP2, seq);
+        }
+    }
 
     // 全谱局部熵乘子（最终合并层）：v(t) *= exp(γ_global · irr_global(t))
+    // 6K/7K 的 LN 密度锚定序列（p2）与 RC 序列时间轴一致，需乘上同一熵增益，
+    // 否则 LN 的 n 会和 1.0.7 产生偏差。
     if (IRR_GAIN_GLOBAL !== 0.0 && mergedSeq.length > 0) {
         const mergedTimes = Float64Array.from(mergedSeq, (row) => row[0]);
         const gEnt = localIrregularity(allOnsets);
         const e = entropyAt(allOnsets, gEnt, mergedTimes);
         for (let k = 0; k < mergedSeq.length; k += 1) {
-            mergedSeq[k][1] *= Math.exp(IRR_GAIN_GLOBAL * e[k]);
+            const gain = Math.exp(IRR_GAIN_GLOBAL * e[k]);
+            mergedSeq[k][1] *= gain;
+            if (mergedSeqP2 !== mergedSeq && k < mergedSeqP2.length) {
+                mergedSeqP2[k][1] *= gain;
+            }
         }
     }
 
@@ -2587,29 +3903,145 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     }
 
     // RC v10：逐事件局部物理维度乘子（仅 4K）
-    const rc10Feat = ((kTotal === 4 || kTotal === 6 || kTotal === 7) && mergedSeq.length > 0)
+    const rc10Feat = ((kTotal >= 4) && mergedSeq.length > 0)
         ? rc10LocalFeatures(lanes, kTotal, Float64Array.from(mergedSeq, (row) => row[0]))
         : null;
     const rc10Mult = rc10LocalMultiplier(rc10Feat);
     // RC v13：高密度单键轮换折叠乘子（仅 4K；6K/7K 返回 null，行为不变）
-    const rcRotMult = (kTotal === 4 && mergedSeq.length > 0)
+    const rcRotMult = (kTotal >= 4 && mergedSeq.length > 0)
         ? rcRotDiscount(lanes, kTotal, Float64Array.from(mergedSeq, (row) => row[0]))
         : null;
+    // RC v14：叠内挖空（抬指/换指）修正（4K/6K/7K 连续量，LN 不经过）
+    const rcHollowMult = (mergedSeq.length > 0)
+        ? rcHollowMultFn(lanes, kTotal, Float64Array.from(mergedSeq, (row) => row[0]))
+        : null;
 
+    // 实验：整手和弦的「一次动作 + 加成」连续模型（rcStackW > 0 时启用）。
+    // 逐行：c = 该排押数，o = 与上一排音轨集的 Jaccard 重合度（i=0 时 o=0）。
+    //   factor = 1 / (1 + w · (c − 1)^q · o^p)
+    // 物理含义：一排同时按 c 键 = 一次整手动作 + 少量加成，不是 c 倍的逐轨密度；
+    // o→1（同一组键反复拍）时按一次动作计；o→0（换轨 chordjack）几乎不打折。
+    // w=1,q=1 时长叠拍 ≈ 单键拍；连续可调，且由时间平滑层保证不抖动。
+    const rcStackW = v11Cfg(`rcStackW${kTotal}`, v11Cfg("rcStackW", 0.0));
+    if (rcStackW !== 0.0 && typeof lanes !== 'undefined' && Array.isArray(lanes)) {
+        const onS = [];
+        for (let c = 0; c < kTotal; c += 1) {
+            const lane = lanes[c];
+            if (!lane) continue;
+            for (let i = 0; i < lane.length; i += 1) onS.push([lane[i].t, c]);
+        }
+        onS.sort((a, b) => (a[0] - b[0]) || (a[1] - b[1]));
+        const sT = []; const sS = [];
+        let tCur = onS.length ? onS[0][0] : 0; let setCur = onS.length ? [onS[0][1]] : [];
+        for (let i = 1; i < onS.length; i += 1) {
+            const t = onS[i][0]; const c = onS[i][1];
+            if (Math.abs(t - tCur) <= 1e-6) setCur.push(c);
+            else { sT.push(tCur); sS.push(setCur.slice()); tCur = t; setCur = [c]; }
+        }
+        if (onS.length) { sT.push(tCur); sS.push(setCur.slice()); }
+        const q = v11Cfg("rcStackQ", 1.0);
+        const p = v11Cfg("rcStackP", 2.0);
+        let ptrS = 0;
+        for (const row of mergedSeq) {
+            const t = row[0];
+            while (ptrS + 1 < sT.length && Math.abs(sT[ptrS + 1] - t) <= Math.abs(sT[ptrS] - t)) ptrS += 1;
+            const b = sS[ptrS];
+            const c = Math.max(1, Math.round(row[2] || 1));
+            if (c <= 1) continue;
+            let o = 0.0;
+            if (ptrS > 0) {
+                const a = sS[ptrS - 1];
+                let inter = 0;
+                for (const x of b) if (a.includes(x)) inter += 1;
+                const uni = a.length + b.length - inter;
+                o = uni > 0 ? inter / uni : 0.0;
+            }
+            const sizeTerm = Math.pow(c - 1, q);
+            const factor = 1.0 / (1.0 + rcStackW * sizeTerm * Math.pow(o, p));
+            if (factor !== 1.0) row[1] *= factor;
+        }
+    }
     let totalCount = 0;
     for (const row of mergedSeq) {
         totalCount += row[2];
     }
     if (totalCount === 0) {
-        return { rcValue: Number.NaN, lnValue: Number.NaN, rcSequence: null, lnSequence: null, rcTicks: [], lnTicks: [] };
+        return { rcValue: Number.NaN, lnValue: Number.NaN, rcSequence: null, lnSequence: null, rcTicks: [], lnTicks: [], overlaps: { rc: [], ln: [], total: 0 } };
     }
 
+    // ---- 耐力层（在分位之前）：长时间维持相近难度 → 对数累积加成；难度突变/断档 → 快速衰减 ----
+    // E_i = E_{i−1}·exp(−(1−sim)·resetK − max(0,dt−gap)/tau) + sim·min(dt,dtCap)/T0
+    // sim = exp(−(ln(v_i/v_{i−1})/σ)²)；endMult_i = 1 + β_k·ln(1 + E_i)
+    const rcEndBeta = v11Cfg(`rcEnd${kTotal}`, v11Cfg("rcEnd", (RC_END_BETA[kTotal] || 0.0)));
+    const rcEndG = v11Cfg(`rcEndG${kTotal}`, v11Cfg("rcEndG", (RC_END_GBETA[kTotal] || 0.0)));
+    const endMult = new Float64Array(mergedSeq.length).fill(1.0);
+    let rcEndScore = 0.0;
+    if (mergedSeq.length > 1) {
+        const sigma = Math.max(1e-3, v11Cfg("rcEndSig", RC_END_SIGMA));
+        const resetK = v11Cfg("rcEndReset", RC_END_RESET_K);
+        const tauMs = Math.max(1.0, v11Cfg("rcEndTau", RC_END_TAU_MS));
+        const gapMs = Math.max(0.0, v11Cfg("rcEndGap", RC_END_GAP_MS));
+        const dtCap = Math.max(1.0, v11Cfg("rcEndDtCap", RC_END_DT_CAP_MS));
+        const t0 = Math.max(1.0, v11Cfg("rcEndT0", RC_END_T0_MS));
+        const emaTau = Math.max(1.0, v11Cfg("rcEndEma", RC_END_EMA_MS));
+        let E = 0.0;
+        let ema = 0.0;
+        let prevBase = 0.0;
+        const eList = [];
+        const lanePtrLo = new Int32Array(laneTimes.length);
+        const lanePtrHi = new Int32Array(laneTimes.length);
+        for (let i = 0; i < mergedSeq.length; i += 1) {
+            const row = mergedSeq[i];
+            const base = row[1] * (rc10Mult ? rc10Mult[i] : 1.0)
+                * (rcRotMult ? rcRotMult[i] : 1.0)
+                * (rcHollowMult ? rcHollowMult[i] : 1.0);
+            const tRow = row[0];
+            let laneNps = 0.0;
+            const winStart = tRow - RC_END_WIN_MS;
+            for (let li = 0; li < laneTimes.length; li += 1) {
+                const arr = laneTimes[li];
+                const len = arr.length;
+                if (!len) continue;
+                // 行时间单调递增：每个轨维护 [winStart, tRow] 的双指针区间，均摊 O(1)
+                let p0 = lanePtrLo[li];
+                while (p0 < len && arr[p0] < winStart) p0 += 1;
+                lanePtrLo[li] = p0;
+                let p1 = lanePtrHi[li];
+                if (p1 < p0) p1 = p0;
+                while (p1 < len && arr[p1] <= tRow) p1 += 1;
+                lanePtrHi[li] = p1;
+                const nps = (p1 - p0) / (RC_END_WIN_MS / 1000.0);
+                if (nps > laneNps) laneNps = nps;
+            }
+            const sVal = laneNps;
+            if (i === 0) {
+                ema = sVal;
+            } else {
+                const dt = Math.max(0.0, row[0] - mergedSeq[i - 1][0]);
+                const alpha = 1.0 - Math.exp(-dt / emaTau);
+                const rr = sVal - ema;
+                const sim = Math.exp(-(rr / sigma) * (rr / sigma));
+                const decay = Math.exp(-(1.0 - sim) * resetK - Math.max(0.0, dt - gapMs) / tauMs);
+                E = E * decay + sim * Math.min(dt, dtCap) / t0;
+                endMult[i] = 1.0 + rcEndBeta * Math.log(1.0 + E);
+                ema += alpha * (sVal - ema);
+            }
+            prevBase = base;
+            eList.push(E);
+        }
+        if (eList.length) {
+            eList.sort((a, b) => a - b);
+            rcEndScore = eList[Math.min(eList.length - 1, Math.floor(0.75 * (eList.length - 1)))];
+        }
+    }
     const mergedValues = new Float64Array(totalCount);
     let idx = 0;
     for (let rowIdx = 0; rowIdx < mergedSeq.length; rowIdx += 1) {
         const row = mergedSeq[rowIdx];
-        const rowMul = (rc10Mult ? rc10Mult[rowIdx] : 1.0) * (rcRotMult ? rcRotMult[rowIdx] : 1.0);
-        const v = row[1] * rowMul;
+        const rowMul = (rc10Mult ? rc10Mult[rowIdx] : 1.0)
+            * (rcRotMult ? rcRotMult[rowIdx] : 1.0)
+            * (rcHollowMult ? rcHollowMult[rowIdx] : 1.0);
+        const v = row[1] * rowMul * endMult[rowIdx];
         const c = row[2];
         for (let k = 0; k < c; k += 1) {
             mergedValues[idx] = v;
@@ -2619,13 +4051,13 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
 
     const n = findNQuantile(mergedValues, QUANTILE);
     if (!Number.isFinite(n) || n <= 0.0) {
-        return { rcValue: Number.NaN, lnValue: Number.NaN, rcSequence: null, lnSequence: null, rcTicks: [], lnTicks: [] };
+        return { rcValue: Number.NaN, lnValue: Number.NaN, rcSequence: null, lnSequence: null, rcTicks: [], lnTicks: [], overlaps: { rc: [], ln: [], total: 0 } };
     }
     // LN 通道的密度尺度 n 不吸收 RC 专用的轮换折叠：roll 折扣只影响 RC 的感知
     // 难度，LN 基准（103 张）按 b1.0.6 口径标定，这里用「不含轮换折扣」的同一
     // 分位数，保证 LN 数值与 b1.0.6 逐位一致（6K/7K 无折扣，直接复用 n）。
     let nNoRot = n;
-    if (rcRotMult) {
+    if (rcRotMult || rcHollowMult) {
         const noRotValues = new Float64Array(totalCount);
         let nr = 0;
         for (let rowIdx = 0; rowIdx < mergedSeq.length; rowIdx += 1) {
@@ -2638,12 +4070,25 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         }
         const nQ = findNQuantile(noRotValues, QUANTILE);
         if (Number.isFinite(nQ) && nQ > 0.0) nNoRot = nQ;
+        // 实验：LN 通道使用「新参数」的 RC 分位（不同分位点），等价于给 LN 单独一套分位参数。
+        const lnAnchorQ = v11Cfg(`lnAnchorQ${kTotal}`, v11Cfg("lnAnchorQ", QUANTILE));
+        if (Math.abs(lnAnchorQ - QUANTILE) > 1e-6) {
+            const nQ2 = findNQuantile(noRotValues, Math.min(1.0, Math.max(0.05, lnAnchorQ)));
+            if (Number.isFinite(nQ2) && nQ2 > 0.0) nNoRot = nQ2;
+        }
+    } else {
+        const lnAnchorQ = v11Cfg(`lnAnchorQ${kTotal}`, v11Cfg("lnAnchorQ", QUANTILE));
+        if (Math.abs(lnAnchorQ - QUANTILE) > 1e-6) {
+            const nQ2 = findNQuantile(mergedValues, Math.min(1.0, Math.max(0.05, lnAnchorQ)));
+            if (Number.isFinite(nQ2) && nQ2 > 0.0) nNoRot = nQ2;
+        }
     }
 
     // 6K：使用 b1.0.5.1 专用映射层；其余键数沿用 beta_1.0.5 的 4K 映射曲线
     MAP_ACTIVE = (kTotal === 6) ? MAP_PROFILE_6K
         : (kTotal === 7) ? MAP_PROFILE_7K
         : MAP_PROFILE_4K;
+    UMAP_ACTIVE = umapFor(kTotal);
     // RC v8：结构特征修正层（连续、无量纲；κ 全 0 时与 beta_1.0.5 逐位一致）
     const rcFeat = rcV8Features(laneTimes, noteCount, onsetCount);
     // 交互项（连续、无量纲；与 _analysis/tune_rc_v8e.py 的 basis() 一致）
@@ -2667,11 +4112,50 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     rcFeat.ix_both_notes = rcFeat.f_both * rcFeat.f_notes;
     // v10：废弃 29 项全局标量层（键型拟合产物），改由逐事件局部物理维度乘子承担。
     const rcFeatDelta = 0.0;
-    const gPred = Math.log(n) - FIT_E_CHORD * chord - FIT_D_LNN * lnN + rcFeatDelta;
+    // chord 项已删除（E=0 的死路径；chord = noteCount/onsetCount 是逐行离散量，若启用会引入跳变）。
+        // 行速率（行/秒）：音数密度 n 之外的另一维——同一 nps 下“行更密”（和弦更小）更难。
+    // 连续口径：多押中单个物件轻微偏移（远小于平均行距）不应算作两行，
+    // 用高斯核把时间上几乎重合的行合并成“有效行数”(1 ≤ N_eff ≤ 行数)。
+    let rowRate = 0.0;
+    let rowRateDiscrete = 0.0;
+    let effRows = 0.0;
+    if (mergedSeq.length > 1) {
+        const t0 = mergedSeq[0][0];
+        const t1 = mergedSeq[mergedSeq.length - 1][0];
+        const span = (t1 - t0) / 1000.0;
+        if (span > 1e-3) {
+            rowRateDiscrete = (mergedSeq.length - 1) / span;
+            const sig = ROW_RATE_MERGE_MS;
+            const s2 = 2.0 * sig * sig;
+            const reach = 4.0 * sig;
+            const m = mergedSeq.length;
+            for (let k = 0; k < m; k += 1) {
+                const tk = mergedSeq[k][0];
+                let acc = 0.0;
+                for (let j = k - 1; j >= 0; j -= 1) {
+                    const dt = tk - mergedSeq[j][0];
+                    if (dt > reach) break;
+                    acc += Math.exp(-(dt * dt) / s2);
+                }
+                for (let j = k + 1; j < m; j += 1) {
+                    const dt = mergedSeq[j][0] - tk;
+                    if (dt > reach) break;
+                    acc += Math.exp(-(dt * dt) / s2);
+                }
+                effRows += 1.0 / (1.0 + acc);
+            }
+            rowRate = effRows > 1.0 ? (effRows - 1.0) / span : 0.0;
+        }
+    }
+    const rowBeta = (typeof ROW_RATE_BETA[kTotal] === 'number') ? ROW_RATE_BETA[kTotal] : 0.0;
+    const rowTerm = (rowRate > 1e-3 && rowBeta !== 0.0) ? rowBeta * Math.log(rowRate / ROW_RATE_REF) : 0.0;
+    const enduranceTerm = rcEndG !== 0.0 ? rcEndG * Math.log(1.0 + rcEndScore) : 0.0;
+    const gPred = Math.log(n) - FIT_D_LNN * lnN + rcFeatDelta + rowTerm + enduranceTerm;
     if (typeof globalThis !== "undefined" && globalThis.__RC_DEBUG_MODE) {
         globalThis.__RC_DEBUG = {
             n, chord, lnN, noteCount, onsetCount, kTotal, laneTimes, rcFeat,
-            gPred, rcFeatDelta,
+            gPred, rcFeatDelta, rowRate, rowRateDiscrete, effRows, rowTerm,
+            rcEndScore, enduranceTerm, endMult,
             mergedTimes: Float64Array.from(mergedSeq, (row) => row[0]),
             mergedRaw: Float64Array.from(mergedSeq, (row) => row[1]),
             mergedCounts: Float64Array.from(mergedSeq, (row) => row[2]),
@@ -2679,7 +4163,7 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
             rcRotMult,
             mapInvertFn: mapInvert,
             mapForwardFn: mapForward,
-            fitEChord: FIT_E_CHORD,
+            chord: chord,
             fitDLnn: FIT_D_LNN,
             nQuantile: QUANTILE,
         };
@@ -2687,20 +4171,22 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     // 映射层输出（rcRawValue）是 4K/6K/7K 各自的映射尺度；6K/7K 再经段位对齐
     // 折线换算成「段位 = 整数」的显示尺度（4K 已是该结构，identity）。
     const rcRawValue = mapInvert(gPred);
-    const rcValue = fixedDensityDanAlign(rcRawValue, kTotal);
+    const rcValue = rcRawValue; // 统一映射层输出已是段位尺度，无需再对齐
     const rcDanTier = fdDanTier(kTotal);
 
     // ---- 难度-进度图序列（RC / LN 逐物件赋值）----
     // RC：合并序列的逐物件贡献（时间/值）。每个物件映射到 value 尺度：
     //   value = mapInvert(ln(raw) − (E·chord + D·lnN))，与 rc_value 同一映射。
-    const rcValueConst = FIT_E_CHORD * chord + FIT_D_LNN * lnN - rcFeatDelta;
+    const rcValueConst = FIT_D_LNN * lnN - rcFeatDelta;
     const rcSeqTimes = [];
     const rcSeqRaw = [];
     const rcSeqValue = [];
     const rcSeqWeights = [];
     for (let rowIdx = 0; rowIdx < mergedSeq.length; rowIdx += 1) {
         const row = mergedSeq[rowIdx];
-        const rowMul = (rc10Mult ? rc10Mult[rowIdx] : 1.0) * (rcRotMult ? rcRotMult[rowIdx] : 1.0);
+        const rowMul = (rc10Mult ? rc10Mult[rowIdx] : 1.0)
+            * (rcRotMult ? rcRotMult[rowIdx] : 1.0)
+            * (rcHollowMult ? rcHollowMult[rowIdx] : 1.0);
         const raw = row[1] * rowMul;
         const count = row[2];
         const val = raw > 0.0 ? mapInvert(Math.log(raw) - rcValueConst) : -60.0;
@@ -2746,7 +4232,7 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         const tickMax = rcDanTier.names.length - 2;
         for (let k = 0; k <= tickMax; k += 1) {
             const raw = Math.exp(
-                mapForward(fixedDensityDanUnalign(k, kTotal) - rcDelta) + rcValueConst,
+                mapForward(k - rcDelta) + rcValueConst, // 统一映射层输出即段位尺度：整数 k 直接对应刻度
             );
             if (Number.isFinite(raw) && raw > 0.0) {
                 rcTicks.push({ value: k, raw });
@@ -2777,10 +4263,12 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
 
     // LN 通道的局部密度输入：RC 合并序列的逐物件 contribution（时间/值）。
     // 时间轴与 RC 一致（已按 1/rate 缩放）；查询时用 释手时刻 × 1/rate。
-    const lnDensityTimes = new Float64Array(totalCount);
-    const lnDensityValues = new Float64Array(totalCount);
+    let p2Count = 0;
+    for (const row of mergedSeqP2) p2Count += row[2];
+    const lnDensityTimes = new Float64Array(p2Count);
+    const lnDensityValues = new Float64Array(p2Count);
     let densityIdx = 0;
-    for (const row of mergedSeq) {
+    for (const row of mergedSeqP2) {
         const c = row[2];
         for (let k = 0; k < c; k += 1) {
             lnDensityTimes[densityIdx] = row[0];
@@ -2792,17 +4280,235 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
 
     const lnMult = lnMultiplier(rawLanes, od, rateNorm, lnDensity);
     const k = lnMult.k;
+    // 统一 LN 锚（4/6/7K 同一公式，逐键常数）：nForLn = wg·n_rc + wo·occupancy + wl·n_local
+    // 权重由 6K/7K/4K LN benchmark 蒸馏标定（见 params_beta_1.1.3.json 的 ln.unified_local_anchor）。
+    const LN_ANCHOR_W = (kTotal === 7)
+        ? { wg: 0.25, wo: 1.00, wl: 0.50 }
+        : ((kTotal === 6) ? { wg: 0.75, wo: 2.00, wl: 0.25 } : { wg: 0.75, wo: 0.50, wl: 0.25 });
+    const lnRcW = v11Cfg("lnRcW", LN_ANCHOR_W.wg);
     let nForLn = nNoRot;
+    const lnAnchorP2 = v11Cfg(`lnAnchorP2${kTotal}`, v11Cfg("lnAnchorP2", -1));
+    if (lnAnchorP2 === 0) nForLn = nNoRot; // 强制使用 RC 均值合并密度（忽略 2-范数）
+    if (mergedSeqP2 !== mergedSeq) {
+        // 旧口径（2-范数手内合并）的密度分位数，保证 6K/7K LN 与 1.0.7 逐位一致
+        const p2Values = new Float64Array(p2Count);
+        let pi = 0;
+        for (let rowIdx = 0; rowIdx < mergedSeqP2.length; rowIdx += 1) {
+            const row = mergedSeqP2[rowIdx];
+            const m = rc10Mult ? rc10Mult[rowIdx] : 1.0;
+            for (let j = 0; j < row[2]; j += 1) p2Values[pi++] = row[1] * m;
+        }
+        const nP2 = findNQuantile(p2Values, QUANTILE);
+        if (Number.isFinite(nP2) && nP2 > 0.0 && lnAnchorP2 !== 0) nForLn = nP2;
+    }
     if (LN_OWN_N_MODE !== 0) {
         const nLn = lnOwnQuantileN(rawLanes, od, 1.0 / rateNorm, lnDensity);
         if (Number.isFinite(nLn) && nLn > 0.0) {
             nForLn = nLn;
         }
     }
+    // LN 密度锚定修正（实验，默认关闭）：RC 密度只反映"按下"的密度，LN 长条占用并不进入，
+    // 导致「少按键、多长条、多叠持」的 LN 谱被系统性低估。用平均同时保持数（occupancy）
+    // 作为 LN 自身负载补进密度锚。
+    // 仅 6K/7K（4K LN 已经标定好，不动）；实验时用 __V11.lnOccK=0 放开到 4K。
+    const lnOccW = v11Cfg("lnOcc", LN_ANCHOR_W.wo);
+    const lnSat = (x, s) => (s > 0.0 ? x / (1.0 + x / s) : x);
+    const lnRcSat = v11Cfg("lnRcSat", 0.0);
+    // LN Speed（短面密集）时 RC 密度与 LN 局部密度重复计数 → 按短面占比衰减 RC 侧锚。
+    const lnRcShort = v11Cfg(`lnRcShort${kTotal}`, v11Cfg("lnRcShort", 0.0));
+    let lnShortShareChart = 0.0;
+    {
+        let shortCnt = 0.0;
+        let holdCnt = 0.0;
+        for (const lane of rawLanes) {
+            for (const n of lane) {
+                if (n.len > 0) {
+                    holdCnt += 1.0;
+                    if (n.len < 200.0) shortCnt += 1.0;
+                }
+            }
+        }
+        if (holdCnt > 0.0) lnShortShareChart = shortCnt / holdCnt;
+    }
+    let shortShareAnchor = 0.0;
+    if (lnRcShort !== 0.0) {
+        let shortCnt = 0.0;
+        let holdCnt = 0.0;
+        for (const lane of rawLanes) {
+            for (const n of lane) {
+                if (n.len > 0) {
+                    holdCnt += 1.0;
+                    if (n.len < 200.0) shortCnt += 1.0;
+                }
+            }
+        }
+        if (holdCnt > 0.0) shortShareAnchor = shortCnt / holdCnt;
+    }
+    const rcShortGate = lnRcShort !== 0.0
+        ? 1.0 - lnRcShort / (1.0 + Math.exp(-(shortShareAnchor - 0.55) / 0.12))
+        : 1.0;
+    const lnAnchorMode = v11Cfg(`lnAnchorMode${kTotal}`, v11Cfg("lnAnchorMode", 0));
+    const lnCsW = v11Cfg("lnCsW", 1.0);
+    const lnCsNeed = lnAnchorMode !== 0
+        || v11Cfg("lnCsAdd", 0.0) !== 0.0
+        || v11Cfg(`lnCsAdd${kTotal}`, LN_CS_ADD_BY_KEY[kTotal] || 0.0) !== 0.0
+        || v11Cfg("lnCsMix", 0.0) !== 0.0
+        || v11Cfg(`lnCsMix${kTotal}`, LN_CS_MIX_BY_KEY[kTotal] || 0.0) !== 0.0;
+    const lnCs = lnCsNeed ? lnChordstreamMetrics(rawLanes) : null;
+    let nRcPart = lnSat(nForLn * lnRcW, lnRcSat) * rcShortGate;
+    if (lnCs && (lnAnchorMode === 1 || lnAnchorMode === 3)) {
+        nRcPart = lnCs.csDensity * lnCsW;
+    }
+    let lnOccupancy = 0.0;
+    if (lnOccW > 0.0) {
+        let holdMs = 0.0;
+        let tMin = Infinity;
+        let tMax = -Infinity;
+        for (const lane of rawLanes) {
+            for (const n of lane) {
+                const len = n.len > 0 ? n.len : 0.0;
+                holdMs += len;
+                if (n.t < tMin) tMin = n.t;
+                const end = n.t + len;
+                if (end > tMax) tMax = end;
+            }
+        }
+        const span = tMax - tMin;
+        if (span > TIME_EPS) {
+            lnOccupancy = holdMs / span;
+            nForLn = nRcPart + lnOccW * lnOccupancy;
+        }
+    }
+    if (lnOccW <= 0.0) {
+        nForLn = nRcPart;
+    }
+    // LN 局部密度锚（统一公式）：只在 LN 事件位置采样 ±lnLocWin ms 内的音符密度，
+    // 非 LN 段的 RC/音符变化不会进入该项。
+    const lnLocW = v11Cfg("lnLocW", LN_ANCHOR_W.wl);
+    const lnLocWin = v11Cfg(`lnLocWin${kTotal}`, v11Cfg("lnLocWin", 500.0));
+    let nLocal = 0.0;
+    if (lnLocW > 0.0) {
+        const lnEnds = [];
+        const allTimes = [];
+        const useCsLocal = Boolean(lnCs) && (lnAnchorMode === 2 || lnAnchorMode === 3);
+        const lnLocMinLen = v11Cfg("lnLocMinLen", 0.0);
+        for (const lane of rawLanes) {
+            for (const n of lane) {
+                allTimes.push(n.t);
+                if (n.len > 0 && n.len >= lnLocMinLen) lnEnds.push(n.t + n.len);
+            }
+        }
+        if (useCsLocal && lnCs && lnCs.csTimes.length > 0) {
+            allTimes.length = 0;
+            for (const t of lnCs.csTimes) allTimes.push(t);
+        }
+        if (lnEnds.length > 0 && allTimes.length > 0) {
+            allTimes.sort((a, b) => a - b);
+            let acc = 0.0;
+            for (const te of lnEnds) {
+                let lo = 0;
+                let hi = allTimes.length;
+                const targetA = te - lnLocWin;
+                while (lo < hi) {
+                    const mid = (lo + hi) >> 1;
+                    if (allTimes[mid] < targetA) lo = mid + 1;
+                    else hi = mid;
+                }
+                let cnt = 0;
+                for (let j = lo; j < allTimes.length && allTimes[j] <= te + lnLocWin; j += 1) {
+                    cnt += 1;
+                }
+                acc += cnt;
+            }
+            nLocal = acc / lnEnds.length / (2.0 * lnLocWin / 1000.0);
+            // 实验：局部锚中混入「Chordstream 局部密度」的比例（默认 0）
+            const lnCsMix = v11Cfg(`lnCsMix${kTotal}`, v11Cfg("lnCsMix", LN_CS_MIX_BY_KEY[kTotal] ?? 0.0));
+            if (lnCsMix > 0.0 && lnCs && lnCs.csTimes.length > 0) {
+                let accCs = 0.0;
+                for (const te of lnEnds) {
+                    let lo2 = 0;
+                    let hi2 = lnCs.csTimes.length;
+                    const ta = te - lnLocWin;
+                    while (lo2 < hi2) {
+                        const mid = (lo2 + hi2) >> 1;
+                        if (lnCs.csTimes[mid] < ta) lo2 = mid + 1;
+                        else hi2 = mid;
+                    }
+                    let c2 = 0;
+                    for (let j = lo2; j < lnCs.csTimes.length && lnCs.csTimes[j] <= te + lnLocWin; j += 1) c2 += 1;
+                    accCs += c2;
+                }
+                const nLocalCs = accCs / lnEnds.length / (2.0 * lnLocWin / 1000.0);
+                nLocal = (1.0 - lnCsMix) * nLocal + lnCsMix * nLocalCs;
+            }
+            // 短面密集（LN Speed）时局部密度与 RC 密度重复计数 → 按短面占比衰减 lnLoc。
+            const LN_LOC_SHORT = (kTotal === 7) ? 0.15 : ((kTotal === 6) ? 0.40 : 0.40);
+            const lnLocShort = v11Cfg(`lnLocShort${kTotal}`, v11Cfg("lnLocShort", LN_LOC_SHORT));
+            if (lnLocShort !== 0.0) {
+                let shortCnt = 0.0;
+                let holdCnt = 0.0;
+                for (const lane of rawLanes) {
+                    for (const n of lane) {
+                        if (n.len > 0) {
+                            holdCnt += 1.0;
+                            if (n.len < 200.0) shortCnt += 1.0;
+                        }
+                    }
+                }
+                if (holdCnt > 0.0) {
+                    const shortShare = shortCnt / holdCnt;
+                    const gate = 1.0 / (1.0 + Math.exp(-(shortShare - 0.55) / 0.12));
+                    nLocal *= (1.0 - lnLocShort * gate);
+                }
+            }
+            const lnLocSat = v11Cfg("lnLocSat", 0.0);
+            nForLn = nForLn + lnLocW * lnSat(nLocal, lnLocSat);
+        }
+    }
+    // 实验：独立「Chordstream 关注」RC 加性项（默认 0）
+    const lnCsAdd = v11Cfg(`lnCsAdd${kTotal}`, v11Cfg("lnCsAdd", LN_CS_ADD_BY_KEY[kTotal] ?? 0.0));
+    if (lnCsAdd !== 0.0 && lnCs) {
+        nForLn = nForLn + lnCsAdd * lnCs.csDensity;
+    }
+    // 锚层交叉项（实验，默认 0）：密度高但保持弱（sHold 低）→ 下调锚；松手结构重（sRelease 高）→ 上调锚。
+    const LN_ANCHOR_MX = (kTotal === 6) ? 0.40 : ((kTotal === 4) ? 0.65 : 0.0);
+    const lnAnchorMx = v11Cfg(`lnAnchorMx${kTotal}`, v11Cfg("lnAnchorMx", LN_ANCHOR_MX));
+    const lnAnchorRel = v11Cfg(`lnAnchorRel${kTotal}`, v11Cfg("lnAnchorRel", 0.0));
+    if (lnAnchorMx !== 0.0 || lnAnchorRel !== 0.0) {
+        const sHoldV = (lnMult.parts && lnMult.parts.sHold) || 0.0;
+        const sReleaseV = (lnMult.parts && lnMult.parts.sRelease) || 0.0;
+        if (lnAnchorMx !== 0.0) {
+            nForLn *= Math.max(0.4, 1.0 - lnAnchorMx * (1.0 - Math.min(1.0, sHoldV / 0.5)));
+        }
+        if (lnAnchorRel !== 0.0) {
+            nForLn *= (1.0 + lnAnchorRel * sReleaseV);
+        }
+    }
     // LN 也与 RC 用同一段位对齐折线（6K/7K 无独立 LN 段位参考，两通道数值尺度接近），
     // 使 LN 胶囊的数字同样等于段位序号；4K 保持原 ln 尺度。
-    const lnRawValue = lnFromRawMapped(k, nForLn);
-    const lnValue = fixedDensityLnAlign(lnRawValue, kTotal);
+    const lnCShift = v11Cfg("lnCShift", 0.0);
+    // 线性 + 倍率联合：u = ln(1 + LN_B·(k·n + b))，b 为逐键常数项（默认 0）。
+    const lnAddB = v11Cfg("lnAddB", LN_ADD_B[kTotal] || 0.0);
+    // 释放精度通道：与密度无关的独立难度，直接叠加在指数域（u 里），随密度自然淡出。
+    const lnShieldHeadW = v11Cfg("lnShieldHead", LN_SHIELD_HEAD_W[kTotal] || 0.0);
+    const lnReleaseW = v11Cfg("lnRelease", LN_RELEASE_W[kTotal] || 0.0);
+    const sShieldHeadValue = (lnMult.parts && lnMult.parts.sShieldHead) || 0.0;
+    const sReleaseValue = (lnMult.parts && lnMult.parts.sRelease) || 0.0;
+    const lnShortLin = v11Cfg(`lnShortLin${kTotal}`, v11Cfg("lnShortLin", 0.0));
+    const lnShortLinTerm = lnShortLin * (lnShortShareChart - 0.5);
+    const lnAddExtra = LN_B * (lnAddB + lnShieldHeadW * sShieldHeadValue + lnReleaseW * sReleaseValue + lnShortLinTerm);
+    const lnRawValue = lnFromRawMapped(k, nForLn, lnAddExtra) + lnCShift;
+    const lnShift = fdDanTier(kTotal)?.lnShift || 0.0;
+    const lnValue = Math.max(0.0, fixedDensityLnAlign(lnRawValue, kTotal) + lnShift);
+    if (typeof globalThis !== "undefined" && globalThis.__RC_DEBUG_MODE) {
+        globalThis.__RC_DEBUG_LN = {
+            lnU: (LN_B * k * nForLn > 0.0) ? Math.log1p(LN_B * k * nForLn) : 0.0,
+            lnUEff: (LN_B * k * nForLn + lnAddExtra > 0.0) ? Math.log1p(LN_B * k * nForLn + lnAddExtra) : 0.0,
+            lnK: k, nForLn, nLocal, lnLocW, lnOccupancy, nRcPart, kTotal, lnRawValue, lnValue,
+            lnAbsorb: lnMult.absorb, lnValid: lnMult.valid,
+            lnParts: lnMult.parts || null,
+        };
+    }
 
     // LN 逐松手事件的赋值：γ 加权结构量 × F(ρ)（与 k 的组件一致），再映射到
     // ln_value 尺度：value = A·ln(1 + B·raw·n)，与图上整数 ln 标注线互为反函数。
@@ -2830,7 +4536,7 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         const scale = (k > 0.0 && uAgg > 0.0) ? k / uAgg : 1.0;
         for (let i = 0; i < lnMult.events.length; i += 1) {
             const raw = uArr[i] * scale;
-            const val = lnFromRawMapped(raw, nForLn);
+            const val = lnFromRawMapped(raw, nForLn, lnAddExtra);
             lnSeqTimes.push(lnMult.events[i].t * invRate);
             lnSeqValue.push(val);
             lnSeqWeights.push(Number.isFinite(lnMult.events[i].w) && lnMult.events[i].w > 0.0 ? lnMult.events[i].w : 1.0);
@@ -2851,21 +4557,22 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
             }
         }
         if (nForLn > 0.0 && Number.isFinite(lnAnchorBase)) {
-            lnAnchor.raw = lnRawFromValue(lnAnchorBase, nForLn);
+            lnAnchor.raw = lnRawFromValue(lnAnchorBase, nForLn, lnAddExtra);
         }
         if (nForLn > 0.0) {
             if (rcDanTier) {
                 // 6K/7K：刻度取整数段位，换算回 LN 映射尺度再求 raw。
-                const tickMax = rcDanTier.names.length - 2;
-                for (let k = 0; k <= tickMax; k += 1) {
-                    const raw = lnRawFromValue(fixedDensityLnUnalign(k, kTotal) - lnDelta, nForLn);
+                const tickMax = rcDanTier.names.length - 1;
+                const tickShift = rcDanTier.lnShift || 0;
+                for (let k = tickShift; k <= tickMax; k += 1) {
+                    const raw = lnRawFromValue(fixedDensityLnUnalign(k - tickShift, kTotal) - lnDelta, nForLn, lnAddExtra);
                     if (Number.isFinite(raw) && raw > 0.0) {
                         lnTicks.push({ value: k, raw });
                     }
                 }
             } else {
                 for (let v = 0; v <= 40; v += 1) {
-                    const raw = lnRawFromValue(v - lnDelta, nForLn);
+                    const raw = lnRawFromValue(v - lnDelta, nForLn, lnAddExtra);
                     if (Number.isFinite(raw) && raw > 0.0) {
                         lnTicks.push({ value: v, raw });
                     }
@@ -2878,7 +4585,7 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
     // 每 100ms 采样、400ms 窗口；窗口内没有 LN 事件时该点直接为 0。
     const lnEventCount = lnSeqTimes.length;
     const lnToRaw = nForLn > 0.0
-        ? (v) => lnRawFromValue(v - lnDelta, nForLn)
+        ? (v) => lnRawFromValue(v - lnDelta, nForLn, lnAddExtra)
         : null;
     const lnYMaxHint = sequenceYMaxHint(lnSeqValue, lnToRaw);
     const gridT0 = rcSeqTimes.length > 0 ? rcSeqTimes[0] : (lnSeqTimes.length > 0 ? lnSeqTimes[0] : 0.0);
@@ -2918,6 +4625,7 @@ export function calculateFixedDensity(source, rate = 1.0, options = {}) {
         lnTicks,
         rcAnchor,
         lnAnchor,
+        overlaps,
     };
 }
 
@@ -2964,23 +4672,23 @@ export const FD_DAN_TIERS = {
     6: {
         names: ["Start", "reg1", "reg2", "reg3", "reg4", "reg5", "reg6", "reg7", "reg8", "reg9",
             "Terra", "Celestial", "Mystery", "Nihility", "Finish", ">Finish++"],
-        alignX: [0.52131, 1.32158, 2.13058, 3.43904, 4.25881, 5.20134, 6.38824, 6.99854, 8.08379,
-            8.93621, 9.99773],
+        alignX: [0.12987, 1.08652, 1.89934, 3.12732, 3.89575, 4.94815, 6.22813, 6.88041, 8.02569, 8.92407, 9.95625],
         alignY: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
         // LN 段位对齐：线性，锚点 = 零 LN 谱的映射下限（0.47022 → 0）与 14 档
         // LN 参考谱中位（15.298/16.381 → 14）。6K/7K 的 lnValue 与段位近似线性，
         // 逐档中位数在低档不单调（每档仅 4 首），故不用逐档折线。
-        lnAlignA: 0.47022,
-        lnAlignB: 1.05913,
+        lnAlignA: 2.844069,
+        lnAlignB: 1.145096,
+        lnShift: 1.0,
     },
     7: {
         names: ["reg0", "reg1", "reg2", "reg3", "reg4", "reg5", "reg6", "reg7", "reg8", "reg9", "reg10",
             "Gamma", "Azimuth", "Zenith", "Stellium", ">Stellium++"],
-        alignX: [0.16633, 0.87391, 2.30470, 3.38495, 3.93047, 5.19532, 6.46276, 6.76134, 8.24082,
-            8.29002, 8.91378, 10.81547, 11.64099, 13.24058, 14.57033],
+        alignX: [0.10859, 0.86939, 2.33368, 3.35119, 3.80531, 5.27076, 6.55909, 6.90430, 8.19752, 8.46649, 9.00737, 10.85177, 11.66500, 13.25279, 14.41561],
         alignY: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
-        lnAlignA: 0.47022,
-        lnAlignB: 1.13648,
+        lnAlignA: 1.791843,
+        lnAlignB: 1.034750,
+        lnShift: 1.0,
     },
 };
 
@@ -3048,7 +4756,8 @@ export function fixedDensityLnAlign(value, keyCount) {
     if (!tier || !Number.isFinite(value) || !(tier.lnAlignB > 0)) {
         return value;
     }
-    return Math.max(0, (value - tier.lnAlignA) / tier.lnAlignB);
+    // 不在这里截 0：低于 Start 的谱需要保留负值，最终显示值由调用处 clamp 到 0。
+    return (value - tier.lnAlignA) / tier.lnAlignB;
 }
 
 export function fixedDensityLnUnalign(value, keyCount) {
@@ -3132,7 +4841,7 @@ export function fixedDensityLnLabel(value, keyCount) {
     }
     const danTier = FD_DAN_TIERS[Number(keyCount)];
     if (danTier) {
-        return fixedDensityDanLabel(value, danTier);
+        return fixedDensityDanLabel(value - (danTier.lnShift || 0), danTier);
     }
     return `ln${Math.round(value)}${fixedDensitySegment(value)}`;
 }

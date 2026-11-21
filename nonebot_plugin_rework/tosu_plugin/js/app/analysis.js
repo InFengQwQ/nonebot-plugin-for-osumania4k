@@ -6,6 +6,7 @@ import { rcLabelToNumeric } from "../estimator/rcDifficultyFormat.js";
 import { classifyCompanellaDifficulty } from "../estimator/companellaEstimator.js";
 import { calculateInterludeStar } from "../interlude/index.js";
 import { calculateFixedDensity } from "../fixedDensity/index.js";
+import { buildOverlapLabels } from "./beatPosition.js";
 import { analyzePatternFromText } from "../patterns/service.js";
 import { OsuFileParser } from "../parser/osuFileParser.js";
 import { runInWorker } from "./worker/manager.js";
@@ -74,6 +75,7 @@ import {
     updateDiffTextVisibility,
 } from "./graph.js";
 import { hideAssignmentCharts, renderAssignmentCharts } from "./assignCharts.js";
+import { buildRcIntervals, ribbonSegments } from "./rcintervals.js";
 import {
     currentEstimatorAlgorithm,
     isAutoDisplayEnabledNow,
@@ -88,6 +90,35 @@ import { trackTelemetryAnalyze } from "./telemetry.js";
 // 上一帧 Fixed Density 图表数据：重算失败时用它保住图表，避免切换 mod 时闪没。
 // 必须同时记住来源谱面身份：换图后重算失败时保留旧图会画错谱面，此时宁可隐藏。
 let lastFixedDensityChartPayload = null;
+// RC 键型区间（排合并后的 Jacks/Stream/Chordstream 段）按谱面身份缓存，避免每帧重算。
+let lastRcIntervals = null;
+let lastRcIntervalsIdentity = "";
+/** 键型色条分段（可直接 JSON 缓存）；解析失败返回 null。 */
+function rcRibbonFor(rawText, keyCount) {
+    try {
+        const iv = rcIntervalsFor(rawText, keyCount);
+        if (!iv) return null;
+        // 带上色条自己的时间范围：图表横轴用的是 RC/LN 序列并集，
+        // 色条必须按同一时间窗口重新投影，否则会与曲线错位。
+        return { t0: iv.t0, t1: iv.t1, segments: ribbonSegments(iv) };
+    } catch (_) {
+        return null;
+    }
+}
+
+function rcIntervalsFor(rawText, keyCount) {
+    const identity = state.lastBeatmapIdentity || "";
+    if (identity && identity === lastRcIntervalsIdentity) return lastRcIntervals;
+    let out = null;
+    try {
+        out = buildRcIntervals(rawText, keyCount);
+    } catch (_) {
+        out = null;
+    }
+    lastRcIntervals = out;
+    lastRcIntervalsIdentity = identity;
+    return out;
+}
 let lastFixedDensityChartIdentity = "";
 
 function escapeHtml(value) {
@@ -373,7 +404,9 @@ export async function fetchBeatmapFile(reason) {
     // star-v4-fdchart：FD 图表负载（rc/ln 序列、刻度、锚点）随快照存取；不带该负载的
     // 旧快照在 FD 模式下视为 miss，否则缓存命中时无法重绘图（IN 开关回到旧 modSignature
     // 时命中旧快照，表现为改图后再也画不出图表）。
-    const CACHE_KEY_STAR_UNIFIED_VERSION = "star-v4-fdchart";
+    // star-v5-fdchart-ribbon：涂色条改为带自身时间范围的对象（并按图表并集窗口重投影），
+    // 旧快照里的数组色条无法重投影，必须失效重算。
+    const CACHE_KEY_STAR_UNIFIED_VERSION = "star-v5-fdchart-ribbon";
     const cacheKey = `${CACHE_KEY_STAR_UNIFIED_VERSION}|${state.estimatorAlgorithm}|${state.lastBeatmapIdentity}|${state.modSignature}`;
     const isMetaDegraded = String(state.lastBeatmapIdentity || "").startsWith("meta:");
     let cached = null;
@@ -560,6 +593,10 @@ export async function fetchBeatmapFile(reason) {
         let fixedDensityLnTicks = [];
         let fixedDensityRcAnchor = null;
         let fixedDensityLnAnchor = null;
+        // 重叠键：{ rc: 时间[], ln: 时间[], total }，图中画红线并在图下方提示。
+        let fixedDensityOverlaps = null;
+        // RC 键型色条分段：命中结果缓存时没有 rawText，只能靠快照里的分段重绘。
+        let fixedDensityRcRibbon = null;
         let isVibroMap = false;
         let resolvedEstDiff = null;
         let resolvedNumericDifficulty = null;
@@ -720,7 +757,9 @@ export async function fetchBeatmapFile(reason) {
                     fixedDensityRcTicks = cachedFdChart.rcTicks || [];
                     fixedDensityLnTicks = cachedFdChart.lnTicks || [];
                     fixedDensityRcAnchor = cachedFdChart.rcAnchor || null;
+                    fixedDensityOverlaps = cachedFdChart.overlaps || null;
                     fixedDensityLnAnchor = cachedFdChart.lnAnchor || null;
+                    fixedDensityRcRibbon = cachedFdChart.rcRibbon || null;
                 }
             } else if (pipelineResult && Number.isFinite(pipelineResult.fixedDensityValue)) {
                 fixedDensityValue = pipelineResult.fixedDensityValue;
@@ -728,6 +767,7 @@ export async function fetchBeatmapFile(reason) {
                 fixedDensityRcSequence = pipelineResult.fixedDensityRcSequence || null;
                 fixedDensityLnSequence = pipelineResult.fixedDensityLnSequence || null;
                 fixedDensityRcTicks = pipelineResult.fixedDensityRcTicks || [];
+                fixedDensityOverlaps = pipelineResult.fixedDensityOverlaps || null;
                 fixedDensityLnTicks = pipelineResult.fixedDensityLnTicks || [];
                 fixedDensityRcAnchor = pipelineResult.fixedDensityRcAnchor || null;
                 fixedDensityLnAnchor = pipelineResult.fixedDensityLnAnchor || null;
@@ -743,6 +783,7 @@ export async function fetchBeatmapFile(reason) {
                     fixedDensityLnTicks = fd.lnTicks || [];
                     fixedDensityRcAnchor = fd.rcAnchor || null;
                     fixedDensityLnAnchor = fd.lnAnchor || null;
+                    fixedDensityOverlaps = fd.overlaps || null;
                     if (isStaleRequest()) return;
                 } catch (_) {
                     fixedDensityValue = Number.NaN;
@@ -752,6 +793,15 @@ export async function fetchBeatmapFile(reason) {
                     fixedDensityRcAnchor = null;
                     fixedDensityLnAnchor = null;
                 }
+            }
+        }
+
+        if (fixedDensityOverlaps && rawText) {
+            try {
+                const labels = buildOverlapLabels(fixedDensityOverlaps, rawText);
+                if (labels) fixedDensityOverlaps = { ...fixedDensityOverlaps, labels };
+            } catch (_) {
+                // 位置标注失败不影响图表本体
             }
         }
 
@@ -979,6 +1029,10 @@ export async function fetchBeatmapFile(reason) {
                         lnTicks: fixedDensityLnTicks,
                         rcAnchor: fixedDensityRcAnchor,
                         lnAnchor: fixedDensityLnAnchor,
+                        overlaps: fixedDensityOverlaps,
+                        lnShare: Number(rework?.lnRatio ?? parsedInfo?.lnRatio ?? 0),
+                        rcRibbon: fixedDensityRcRibbon
+                            || rcRibbonFor(rawText, rework?.columnCount ?? 4),
                     }
                     : null;
                 resultCache.put(cacheKey, {
@@ -1130,7 +1184,10 @@ export async function fetchBeatmapFile(reason) {
                 showNumericStarValue(rework.star);
                 leftCapsuleUnit = "SR";
             }
-            if (Number.isFinite(fixedDensityLnValue)) {
+            // 6K/7K 的 LN 显示尺度是「段位序号 + 1」（Start = 1），无 LN 谱不应显示 Start：
+            // LN 占比极小时直接隐藏 LN 胶囊。
+            const lnShare = Number(rework?.lnRatio ?? parsedInfo?.lnRatio ?? 0);
+            if (Number.isFinite(fixedDensityLnValue) && lnShare > 0.02) {
                 showFixedDensityLnValue(fixedDensityLnValue, parsedInfo?.columnCount ?? rework?.columnCount);
             }
         } else if (state.srText === "ReworkPP") {
@@ -1176,6 +1233,7 @@ export async function fetchBeatmapFile(reason) {
                     fixedDensityLnTicks = fd.lnTicks || [];
                     fixedDensityRcAnchor = fd.rcAnchor || null;
                     fixedDensityLnAnchor = fd.lnAnchor || null;
+                    fixedDensityOverlaps = fd.overlaps || null;
                 } catch (_) {
                     fixedDensityRcSequence = null;
                     fixedDensityLnSequence = null;
@@ -1192,6 +1250,10 @@ export async function fetchBeatmapFile(reason) {
                     lnTicks: fixedDensityLnTicks,
                     rcAnchor: fixedDensityRcAnchor,
                     lnAnchor: fixedDensityLnAnchor,
+                    overlaps: fixedDensityOverlaps,
+                    lnShare: Number(rework?.lnRatio ?? parsedInfo?.lnRatio ?? 0),
+                    rcRibbon: fixedDensityRcRibbon
+                        || rcRibbonFor(rawText, parsedInfo?.columnCount ?? rework?.columnCount ?? 4),
                 };
                 lastFixedDensityChartPayload = payload;
                 lastFixedDensityChartIdentity = state.lastBeatmapIdentity || "";

@@ -224,7 +224,7 @@ function parseHitObjects(lines) {
         if (parts.length < 5) continue;
 
         const x = Number.parseFloat(parts[0]);
-        const time = Math.trunc(Number.parseFloat(parts[2]));
+        const time = Number.parseFloat(parts[2]);
         const typ = Number.parseInt(parts[3], 10);
 
         const isHold = (typ & 128) !== 0;
@@ -235,6 +235,8 @@ function parseHitObjects(lines) {
                 const parsed = Number.parseFloat(endPart);
                 if (!Number.isNaN(parsed)) endTime = Math.trunc(parsed);
             }
+            // 与 osu! 一致：尾时间无效的 LN 整个物件被忽略（如 -2147483648 / 早于头）。
+            if (!Number.isFinite(endTime) || endTime <= time || endTime < 0) continue;
             out.push({ kind: "Hold", X: x, Time: time, EndTime: endTime });
         } else {
             out.push({ kind: "HitCircle", X: x, Time: time });

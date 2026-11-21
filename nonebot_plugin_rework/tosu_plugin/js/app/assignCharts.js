@@ -7,6 +7,7 @@ import { APP_CONFIG, mainCardEl, state } from "./appContext.js";
 import { starColorFor } from "./display.js";
 import { fixedDensityRcLabel, fixedDensityLnLabel, fixedDensityDanTickLabel } from "../fixedDensity/index.js";
 import { getInterpolatedPlaybackTime } from "./graph.js";
+import { ribbonSegments } from "./rcintervals.js";
 
 const VB_W = 492;
 const VB_H = 104;
@@ -68,7 +69,7 @@ function percentile(sorted, p) {
     return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
 }
 
-function buildChartData(sequence, ticks, labelFn, width = VB_W, anchor = null) {
+function buildChartData(sequence, ticks, labelFn, width = VB_W, anchor = null, timeRange = null, markerTimes = null, nearTimes = null) {
     if (!sequence || !Array.isArray(sequence.times) || sequence.times.length < 2) {
         return null;
     }
@@ -83,8 +84,15 @@ function buildChartData(sequence, ticks, labelFn, width = VB_W, anchor = null) {
     for (let i = 0; i < n; i += 1) order[i] = i;
     order.sort((a, b) => times[a] - times[b]);
 
-    const t0 = times[order[0]];
-    const t1 = times[order[n - 1]];
+    // RC / LN 两张图共用同一个时间窗口，横向坐标才能一一对应；
+    // 传入 timeRange 时以它为基准（谱面整体时间跨度），否则退回本序列首尾。
+    const seqT0 = times[order[0]];
+    const seqT1 = times[order[n - 1]];
+    const rangeT0 = Number(timeRange?.t0);
+    const rangeT1 = Number(timeRange?.t1);
+    const hasRange = Number.isFinite(rangeT0) && Number.isFinite(rangeT1) && rangeT1 - rangeT0 > 1e-6;
+    const t0 = hasRange ? rangeT0 : seqT0;
+    const t1 = hasRange ? rangeT1 : seqT1;
     if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 - t0 < 1e-6) {
         return null;
     }
@@ -98,10 +106,24 @@ function buildChartData(sequence, ticks, labelFn, width = VB_W, anchor = null) {
     const anchorValue = Number(anchor?.value);
     const anchorRaw = Number(anchor?.raw);
     const yMaxHint = Number(sequence.yMax);
+    // 纵轴上限需同时容纳曲线峰值、锚线、以及「锚线以上 TICKS_ABOVE 档」的刻度线，
+    // 否则难度波动较大时上方参考线会被裁掉。
+    let tickTopRaw = 0;
+    if (Number.isFinite(anchorValue) && Array.isArray(ticks)) {
+        const tvMax = Math.floor(anchorValue) + TICKS_ABOVE;
+        for (const tick of ticks) {
+            const tv = Number(tick.value);
+            const tr = Number(tick.raw);
+            if (Number.isFinite(tv) && Number.isFinite(tr) && tr > 0 && tv <= tvMax && tr > tickTopRaw) {
+                tickTopRaw = tr;
+            }
+        }
+    }
     const yMax = Math.max(
         p995 > 0 ? p995 * 1.08 : 0,
         Number.isFinite(yMaxHint) && yMaxHint > 0 ? yMaxHint : 0,
         Number.isFinite(anchorRaw) && anchorRaw > 0 ? anchorRaw * 1.03 : 0,
+        tickTopRaw > 0 ? tickTopRaw * 1.06 : 0,
         1e-6,
     );
 
@@ -217,7 +239,8 @@ function buildChartData(sequence, ticks, labelFn, width = VB_W, anchor = null) {
     }
 
     // 整数 value 标注线：锚线以下按高度自适应，尽量多画线；标签只给不重叠的一部分。
-    const maxTickValue = Number.isFinite(anchorValue) ? Math.floor(anchorValue) + TICKS_ABOVE : Infinity;
+    // 参考线一直画到绘图区顶端（不再限制锚线以上档数），避免顶部大片空白影响观感。
+    const maxTickValue = Infinity;
     const minTickValue = Number.isFinite(anchorValue) ? Math.max(0, Math.floor(anchorValue) - TICKS_BELOW) : -Infinity;
     const tickAll = [];
     const seenTickLabels = new Set();
@@ -259,11 +282,27 @@ function buildChartData(sequence, ticks, labelFn, width = VB_W, anchor = null) {
         lastLabelY = tick.y;
     }
 
+    // 重叠键红线 / 近似重叠黄线位置（RC / LN 各自一组）
+    const toXs = (arr) => {
+        const out = [];
+        if (!Array.isArray(arr)) return out;
+        for (const raw of arr) {
+            const t = Number(raw);
+            if (!Number.isFinite(t) || t < t0 || t > t1) continue;
+            out.push(PAD_L + ((t - t0) / (t1 - t0)) * plotW);
+        }
+        return out;
+    };
+    const markerXs = toXs(markerTimes);
+    const nearXs = toXs(nearTimes);
+
     return {
         t0,
         t1,
         xs,
         ys,
+        markerXs,
+        nearXs,
         segmentColors,
         gradientStops,
         tickLines,
@@ -282,6 +321,13 @@ function drawChart(svg, data) {
         svg.removeChild(svg.firstChild);
     }
 
+    // 先画难度锚线，再画图表参考线：锚线在下、参考线在上，避免锚线遮住被覆盖的刻度线。
+    if (data.anchor) {
+        svg.appendChild(svgEl("line", {
+            x1: PAD_L, x2: width - PAD_R, y1: data.anchor.y, y2: data.anchor.y,
+            class: "fd-assign-anchor", stroke: data.anchor.color,
+        }));
+    }
     for (const tick of data.tickLines || []) {
         svg.appendChild(svgEl("line", {
             x1: PAD_L, x2: width - PAD_R, y1: tick.y, y2: tick.y,
@@ -296,12 +342,7 @@ function drawChart(svg, data) {
         label.textContent = tick.label;
         svg.appendChild(label);
     }
-
     if (data.anchor) {
-        svg.appendChild(svgEl("line", {
-            x1: PAD_L, x2: width - PAD_R, y1: data.anchor.y, y2: data.anchor.y,
-            class: "fd-assign-anchor", stroke: data.anchor.color,
-        }));
         const anchorLabel = svgEl("text", {
             x: PAD_L - 2, y: data.anchor.y + 2.2, class: "fd-assign-anchor-label",
             fill: data.anchor.labelColor, "text-anchor": "end",
@@ -358,6 +399,34 @@ function drawChart(svg, data) {
         svg.appendChild(lineGroup);
     }
 
+    // 近似重叠：黄色竖线（仅图表标注，不影响数值）。
+    if (Array.isArray(data.nearXs) && data.nearXs.length > 0) {
+        const nearGroup = svgEl("g", { class: "fd-assign-near-overlap" });
+        for (const x of data.nearXs) {
+            nearGroup.appendChild(svgEl("line", {
+                x1: x.toFixed(2), x2: x.toFixed(2),
+                y1: PAD_T, y2: PAD_T + PLOT_H,
+                class: "fd-assign-overlap-line fd-assign-near-line",
+                stroke: "#ffd60a",
+            }));
+        }
+        svg.appendChild(nearGroup);
+    }
+
+    // 重叠键：红色竖线（每根线代表 n 个叠放物件中的 n-1 处重叠）。
+    if (Array.isArray(data.markerXs) && data.markerXs.length > 0) {
+        const markerGroup = svgEl("g", { class: "fd-assign-overlap" });
+        for (const x of data.markerXs) {
+            markerGroup.appendChild(svgEl("line", {
+                x1: x.toFixed(2), x2: x.toFixed(2),
+                y1: PAD_T, y2: PAD_T + PLOT_H,
+                class: "fd-assign-overlap-line",
+                stroke: "#ff3b30",
+            }));
+        }
+        svg.appendChild(markerGroup);
+    }
+
     const cursor = svgEl("line", {
         x1: 0, x2: 0, y1: PAD_T, y2: PAD_T + PLOT_H,
         class: "fd-assign-cursor",
@@ -401,9 +470,138 @@ function stopAnimationLoop() {
     }
 }
 
+/** RC 图下方的键型色条：Jack 红 / Chordstream 绿 / Stream 蓝。 */
+function renderRcRibbon(input, timeRange = null) {
+    const el = document.getElementById("fd-assign-rc-ribbon");
+    if (!el) return;
+    let segs = [];
+    let srcT0 = Number.NaN;
+    let srcT1 = Number.NaN;
+    try {
+        if (Array.isArray(input)) {
+            // 旧缓存只有分段数组（比例基于它自己的时间范围），无法重投影。
+            segs = input;
+        } else if (input && Array.isArray(input.segments)) {
+            segs = input.segments;
+            srcT0 = Number(input.t0);
+            srcT1 = Number(input.t1);
+        } else if (input && Array.isArray(input.segs)) {
+            segs = ribbonSegments(input);
+            srcT0 = Number(input.t0);
+            srcT1 = Number(input.t1);
+        }
+    } catch (_) {
+        segs = [];
+    }
+    // 图表横轴使用 RC/LN 序列并集；色条按同一窗口重新投影，保证与曲线对齐。
+    const dstT0 = Number(timeRange?.t0);
+    const dstT1 = Number(timeRange?.t1);
+    const canRemap = Number.isFinite(srcT0) && Number.isFinite(srcT1) && srcT1 - srcT0 > 1e-6
+        && Number.isFinite(dstT0) && Number.isFinite(dstT1) && dstT1 - dstT0 > 1e-6;
+    if (canRemap) {
+        const srcSpan = srcT1 - srcT0;
+        const dstSpan = dstT1 - dstT0;
+        segs = segs
+            .map((seg) => {
+                const left = (srcT0 + seg.left * srcSpan - dstT0) / dstSpan;
+                const width = seg.width * srcSpan / dstSpan;
+                return { ...seg, left, width };
+            })
+            .filter((seg) => seg.width > 0 && seg.left < 1 && seg.left + seg.width > 0);
+    }
+    const wrap = el.parentElement;
+    el.textContent = "";
+    if (!segs.length) {
+        el.hidden = true;
+        if (wrap) wrap.hidden = true;
+        return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const seg of segs) {
+        const cell = document.createElement("i");
+        cell.className = `seg ${seg.type === "Jacks" ? "jack" : seg.type === "Chordstream" ? "chord" : seg.type === "Stream" ? "stream" : "gap"}`;
+        cell.style.left = `${(seg.left * 100).toFixed(3)}%`;
+        cell.style.width = `${(seg.width * 100).toFixed(3)}%`;
+        if (seg.type !== "gap" && seg.type !== "Jacks" && seg.type !== "Chordstream" && seg.type !== "Stream") {
+            cell.style.background = "transparent";
+        }
+        frag.appendChild(cell);
+    }
+    el.appendChild(frag);
+    el.hidden = false;
+    if (wrap) wrap.hidden = false;
+}
+
+function renderOverlapNote(overlaps) {
+    const el = document.getElementById("fd-assign-overlap-note");
+    const listEl = document.getElementById("fd-assign-overlap-list");
+    const total = Number(overlaps?.total);
+    const nearTotal = Number(overlaps?.nearTotal);
+    const hasRed = Number.isFinite(total) && total > 0;
+    const hasNear = Number.isFinite(nearTotal) && nearTotal > 0;
+    if (!hasRed && !hasNear) {
+        if (el) { el.textContent = ""; el.hidden = true; el.classList.remove("near"); }
+        if (listEl) { listEl.textContent = ""; listEl.hidden = true; }
+        return;
+    }
+    if (el) {
+        if (hasRed) {
+            el.textContent = `存在${Math.round(total)}处重叠键，请检查谱面`;
+            el.classList.remove("near");
+        } else {
+            el.textContent = `存在${Math.round(nearTotal)}处近似重叠键，请检查谱面`;
+            el.classList.add("near");
+        }
+        el.hidden = false;
+    }
+    renderOverlapList(overlaps, listEl);
+}
+
+function renderOverlapList(overlaps, listEl) {
+    if (!listEl) return;
+    const labels = overlaps?.labels;
+    const shown = Array.isArray(labels?.shown) ? labels.shown : [];
+    if (shown.length === 0) {
+        listEl.textContent = "";
+        listEl.hidden = true;
+        return;
+    }
+    listEl.textContent = "";
+    const frag = document.createDocumentFragment();
+    for (const item of shown) {
+        const row = document.createElement("div");
+        row.className = `fd-assign-overlap-row ${item.kind === "near" ? "near" : "red"}`;
+        row.textContent = item.text;
+        frag.appendChild(row);
+    }
+    if (labels.truncated) {
+        const more = document.createElement("div");
+        more.className = `fd-assign-overlap-row fd-assign-overlap-more ${labels.shown[0]?.kind === "near" ? "near" : "red"}`;
+        more.textContent = `… 其余 ${Math.max(0, Number(labels.total || 0) - shown.length)} 处未显示`;
+        frag.appendChild(more);
+    }
+    listEl.appendChild(frag);
+    listEl.hidden = false;
+}
+
 export function hideAssignmentCharts() {
     const wrap = document.getElementById("fd-assign-charts");
     if (wrap) wrap.hidden = true;
+    const ribbon = document.getElementById("fd-assign-rc-ribbon");
+    if (ribbon) {
+        ribbon.textContent = "";
+        ribbon.hidden = true;
+    }
+    const note = document.getElementById("fd-assign-overlap-note");
+    if (note) {
+        note.textContent = "";
+        note.hidden = true;
+    }
+    const list = document.getElementById("fd-assign-overlap-list");
+    if (list) {
+        list.textContent = "";
+        list.hidden = true;
+    }
     charts.rc = null;
     charts.ln = null;
     stopAnimationLoop();
@@ -429,15 +627,37 @@ export function renderAssignmentCharts(data) {
     // 事件数够但难度本身≈0 的谱面（例如 18th Dan：LN% 0.5%、lnValue≈7e-8）
     // 画出来只会是一条贴着底部的 ln0 直线，白占一块卡片高度，直接隐藏。
     const lnAnchorValue = Number(data.lnAnchor?.value);
-    const hasLnLevel = !Number.isFinite(lnAnchorValue) || lnAnchorValue >= 0.5;
-    const hasLn = hasLnLevel && Boolean(lnSeq && (Number.isFinite(lnEventCount) ? lnEventCount : lnSampleCount) >= 8);
+    // 新版 LN 映射层下限约 0.75（无 LN 谱），阈值抬到 1.0，避免「几乎无 LN」的谱出现空白 LN 面板。
+    const hasLnLevel = !Number.isFinite(lnAnchorValue) || lnAnchorValue >= 1.0;
+    const lnShare = Number(data.lnShare);
+    const hasLnShare = !Number.isFinite(lnShare) || lnShare >= 0.02;
+    const hasLn = hasLnLevel && hasLnShare && Boolean(lnSeq && (Number.isFinite(lnEventCount) ? lnEventCount : lnSampleCount) >= 8);
     const keyCount = Number(data.keyCount);
     const hasDanTier = Boolean(fixedDensityDanTickLabel(0, keyCount));
     const rcLabelFn = (v) => (hasDanTier ? fixedDensityDanTickLabel(v, keyCount) : fixedDensityRcLabel(v, keyCount));
-    const rcData = buildChartData(data.rc, data.rcTicks, rcLabelFn, VB_W, data.rcAnchor);
+    // 统一时间窗口：取 RC / LN 序列首尾的并集，保证两张图横向一一对应。
+    let rangeT0 = Infinity;
+    let rangeT1 = -Infinity;
+    for (const seq of [data.rc, data.ln]) {
+        const tArr = seq?.times;
+        if (!Array.isArray(tArr) || tArr.length === 0) continue;
+        const a = Number(tArr[0]);
+        const b = Number(tArr[tArr.length - 1]);
+        if (Number.isFinite(a)) rangeT0 = Math.min(rangeT0, a);
+        if (Number.isFinite(b)) rangeT1 = Math.max(rangeT1, b);
+    }
+    const timeRange = (Number.isFinite(rangeT0) && Number.isFinite(rangeT1) && rangeT1 - rangeT0 > 1e-6)
+        ? { t0: rangeT0, t1: rangeT1 }
+        : null;
+    const overlaps = data.overlaps || null;
+    const rcMarkerTimes = Array.isArray(overlaps?.rc) ? overlaps.rc : null;
+    const lnMarkerTimes = Array.isArray(overlaps?.ln) ? overlaps.ln : null;
+    const rcNearTimes = Array.isArray(overlaps?.nearRc) ? overlaps.nearRc : null;
+    const lnNearTimes = Array.isArray(overlaps?.nearLn) ? overlaps.nearLn : null;
+    const rcData = buildChartData(data.rc, data.rcTicks, rcLabelFn, VB_W, data.rcAnchor, timeRange, rcMarkerTimes, rcNearTimes);
     const lnLabelFn = (v) => (hasDanTier ? fixedDensityDanTickLabel(v, keyCount) : fixedDensityLnLabel(v, keyCount));
     const lnData = hasLn
-        ? buildChartData(lnSeq, data.lnTicks, lnLabelFn, VB_W, data.lnAnchor)
+        ? buildChartData(lnSeq, data.lnTicks, lnLabelFn, VB_W, data.lnAnchor, timeRange, lnMarkerTimes, lnNearTimes)
         : null;
     if (!rcData && !lnData) {
         hideAssignmentCharts();
@@ -450,6 +670,11 @@ export function renderAssignmentCharts(data) {
     if (lnWrap) lnWrap.hidden = !lnData;
     if (rcData) drawChart(rcSvg, rcData);
     if (lnData) drawChart(lnSvg, lnData);
+    renderRcRibbon(
+        rcData ? (data.rcRibbon || data.rcIntervals) : null,
+        rcData ? { t0: rcData.t0, t1: rcData.t1 } : null,
+    );
+    renderOverlapNote(overlaps);
     wrap.classList.toggle("single", !rcData || !lnData);
     wrap.hidden = false;
     if (mainCardEl) mainCardEl.classList.add("fd-charts");

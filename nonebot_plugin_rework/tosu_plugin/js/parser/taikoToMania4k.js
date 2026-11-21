@@ -131,7 +131,7 @@ export function convertTaikoToMania4k(osuText) {
             if (!line || line.startsWith("//")) continue;
             const parts = line.split(",");
             if (parts.length < 5) continue;
-            const time = Math.trunc(Number.parseFloat(parts[2]));
+            const time = Number.parseFloat(parts[2]);
             const objType = Number.parseInt(parts[3], 10);
             const hitSound = Number.parseInt(parts[4], 10);
             if (!Number.isFinite(time) || !Number.isFinite(objType) || !Number.isFinite(hitSound)) {
