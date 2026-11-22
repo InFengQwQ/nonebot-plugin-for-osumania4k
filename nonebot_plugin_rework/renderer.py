@@ -352,9 +352,23 @@ class Renderer:
         self.start_http()
 
     async def _ensure_browser(self) -> None:
-        if self._page is not None:
+        if (
+            self._page is not None
+            and not self._page.is_closed()
+            and self._browser is not None
+            and self._browser.is_connected()
+        ):
             return
 
+        await self._close_browser()
+        try:
+            await self._start_browser()
+        except BaseException:
+            # 启动途中失败或请求取消时，也要释放已创建的驱动 / 浏览器。
+            await self._close_browser()
+            raise
+
+    async def _start_browser(self) -> None:
         from playwright.async_api import async_playwright
 
         self._playwright = await async_playwright().start()
@@ -389,18 +403,26 @@ class Renderer:
         self._page = await context.new_page()
         self._page.on("pageerror", lambda err: logger.debug("page error: %s", err))
 
+    async def _close_browser(self) -> None:
+        """清空失效句柄，并分别释放浏览器和驱动；调用方须持有渲染锁。"""
+        browser, playwright = self._browser, self._playwright
+        self._browser = None
+        self._page = None
+        self._playwright = None
+        for resource, method in ((browser, "close"), (playwright, "stop")):
+            if resource is not None:
+                try:
+                    # 驱动已断开时 close 也可能失败或挂起，不能阻止后续重建。
+                    await asyncio.wait_for(getattr(resource, method)(), timeout=10)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("释放浏览器资源失败（%s）：%s", method, exc)
+
     async def close(self) -> None:
         # 先取锁：保证正在进行的渲染结束后再关闭浏览器。
         async with self._lock:
             try:
-                if self._browser is not None:
-                    await self._browser.close()
-                if self._playwright is not None:
-                    await self._playwright.stop()
+                await self._close_browser()
             finally:
-                self._browser = None
-                self._page = None
-                self._playwright = None
                 if self._server is not None:
                     self._server.shutdown()
                     self._server.server_close()
@@ -419,7 +441,6 @@ class Renderer:
     ) -> bytes:
         """渲染单张谱面，返回卡片 PNG 字节。"""
         async with self._lock:
-            await self._ensure_browser()
             self._state.osu_text = osu_text
             self._state.background = background
             safe_rate = float(speed_rate) if float(speed_rate) > 0 else 1.0
@@ -447,18 +468,22 @@ class Renderer:
                 len(osu_text),
                 f"{len(background) / 1024:.0f} KB" if background else "无",
             )
-            try:
-                png = await self._render_once()
-            except RenderError:
-                logger.error("渲染失败（用时 %.1fs）", time.perf_counter() - started)
-                raise
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("渲染出错，重试一次：%s", exc)
+            for attempt in range(2):
                 try:
+                    await self._ensure_browser()
                     png = await self._render_once()
-                except Exception as retry_exc:  # noqa: BLE001
-                    logger.error("重试仍失败（用时 %.1fs）：%s", time.perf_counter() - started, retry_exc)
+                    break
+                except RenderError:
+                    logger.error("渲染失败（用时 %.1fs）", time.perf_counter() - started)
                     raise
+                except Exception as exc:  # noqa: BLE001
+                    # 断开的 Playwright 管道无法靠刷新原页面恢复，必须连驱动一起重建。
+                    await self._close_browser()
+                    if attempt == 0:
+                        logger.warning("渲染出错，重建浏览器和驱动后重试一次：%s", exc)
+                        continue
+                    logger.error("重试仍失败（用时 %.1fs）：%s", time.perf_counter() - started, exc)
+                    raise RenderError(f"浏览器渲染失败，自动重建后仍未恢复：{exc}") from exc
 
             logger.info(
                 "渲染完成：输出 %.1f KB，用时 %.1fs",

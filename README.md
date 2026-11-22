@@ -287,6 +287,8 @@ python scripts\render_local.py .\pack.osz --out .\temp
 
 ## 8. 常见问题
 
+- **`Page.goto: Connection closed while reading from the driver`**：浏览器驱动意外退出。
+  渲染器会释放旧连接、重建 Playwright 驱动和浏览器，并自动重试一次；更新插件后需重启机器人。
 - **`无法启动无头浏览器`**：执行 `python -m playwright install chromium`，或把
   `REWORK_BROWSER_CHANNEL` 设为 `"msedge"`。
 - **端口被占用**：修改 `REWORK_RENDER_PORT`（避开 tosu 的 24050）。
