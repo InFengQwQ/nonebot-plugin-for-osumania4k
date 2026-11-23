@@ -1,0 +1,582 @@
+{
+  "source": "Nick2357111/nonebot-plugin-for-osumania4k@928549fcc8f9a9f4d6b28ae40341723bd05f91bc",
+  "algorithm": "beta_1.1.3 / Fixed Density v1.2",
+  "cases": [
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": -0.5879155644272189,
+      "lnValue": 1.4474810061551235
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": -0.707966857686135,
+      "lnValue": 3.320516040149493
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": -0.5879155644272189,
+      "lnValue": 0
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": -0.707966857686135,
+      "lnValue": 0
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 1.1107661827165838,
+      "lnValue": 2.263054061909899
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 1.0374090034958123,
+      "lnValue": 4.914891751605725
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 1.1107661827165838,
+      "lnValue": 0
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 1.0374090034958123,
+      "lnValue": 0
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 3.57150716867582,
+      "lnValue": 4.300796748363026
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 3.431433122993789,
+      "lnValue": 8.209738885375012
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 3.57150716867582,
+      "lnValue": 0
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 3.431433122993789,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 9.445865490143717,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 9.047590833178644,
+      "lnValue": 11.113779539294136
+    },
+    {
+      "pattern": "roll",
+      "rate": 0.75,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 9.445865490143717,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 0.75,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 9.047590833178644,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 12.27878977729292,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 11.94617505761717,
+      "lnValue": 15.757848622862735
+    },
+    {
+      "pattern": "roll",
+      "rate": 1,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 12.27878977729292,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 1,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 11.94617505761717,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 15.838533135191797,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 15.644105985930974,
+      "lnValue": 22.761508307208516
+    },
+    {
+      "pattern": "roll",
+      "rate": 1.5,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 15.838533135191797,
+      "lnValue": 0
+    },
+    {
+      "pattern": "roll",
+      "rate": 1.5,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 15.644105985930974,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 9.047579421311557,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 8.626109120786065,
+      "lnValue": 10.664527479237865
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 0.75,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 9.047579421311557,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 0.75,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 8.626109120786065,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 13.953741197233418,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 13.78363319687426,
+      "lnValue": 15.201149159443123
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 13.953741197233418,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 13.78363319687426,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 18.11170905139315,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 17.904155946181643,
+      "lnValue": 22.037645039656763
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1.5,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 18.11170905139315,
+      "lnValue": 0
+    },
+    {
+      "pattern": "crosshand",
+      "rate": 1.5,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 17.904155946181643,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": -0.5879155644272189,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": -0.707966857686135,
+      "lnValue": 3.320516040149493
+    },
+    {
+      "pattern": "rc",
+      "rate": 0.75,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": -0.5879155644272189,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 0.75,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": -0.707966857686135,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 1.1107661827165838,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 1.0374090034958123,
+      "lnValue": 4.914891751605725
+    },
+    {
+      "pattern": "rc",
+      "rate": 1,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 1.1107661827165838,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 1,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 1.0374090034958123,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 3.57150716867582,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 3.431433122993789,
+      "lnValue": 8.209738885375012
+    },
+    {
+      "pattern": "rc",
+      "rate": 1.5,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 3.57150716867582,
+      "lnValue": 0
+    },
+    {
+      "pattern": "rc",
+      "rate": 1.5,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 3.431433122993789,
+      "lnValue": 0
+    },
+    {
+      "pattern": "ln",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": -0.5879155644272189,
+      "lnValue": 1.9008597067725315
+    },
+    {
+      "pattern": "ln",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": -0.707966857686135,
+      "lnValue": 3.320516040149493
+    },
+    {
+      "pattern": "ln",
+      "rate": 0.75,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": -0.5879155644272189,
+      "lnValue": 0
+    },
+    {
+      "pattern": "ln",
+      "rate": 0.75,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": -0.707966857686135,
+      "lnValue": 0
+    },
+    {
+      "pattern": "ln",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 1.1107661827165838,
+      "lnValue": 3.019200174036538
+    },
+    {
+      "pattern": "ln",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 1.0374090034958123,
+      "lnValue": 4.914891751605725
+    },
+    {
+      "pattern": "ln",
+      "rate": 1,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 1.1107661827165838,
+      "lnValue": 0
+    },
+    {
+      "pattern": "ln",
+      "rate": 1,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 1.0374090034958123,
+      "lnValue": 0
+    },
+    {
+      "pattern": "ln",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 4,
+      "rcValue": 3.57150716867582,
+      "lnValue": 5.601767366802642
+    },
+    {
+      "pattern": "ln",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 4,
+      "rcValue": 3.431433122993789,
+      "lnValue": 8.209738885375012
+    },
+    {
+      "pattern": "ln",
+      "rate": 1.5,
+      "cvtFlag": "HO",
+      "keys": 4,
+      "rcValue": 3.57150716867582,
+      "lnValue": 0
+    },
+    {
+      "pattern": "ln",
+      "rate": 1.5,
+      "cvtFlag": "INHO",
+      "keys": 4,
+      "rcValue": 3.431433122993789,
+      "lnValue": 0
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 6,
+      "rcValue": -6.7686565535621,
+      "lnValue": 0.7443106430375909
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 6,
+      "rcValue": -7.028952857169357,
+      "lnValue": 3.5529641145936526
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 6,
+      "rcValue": -3.357675446441664,
+      "lnValue": 1.4701068969060307
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 6,
+      "rcValue": -3.637024460082016,
+      "lnValue": 4.565417277525501
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 6,
+      "rcValue": 0.7241117426861604,
+      "lnValue": 3.360825751797526
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 6,
+      "rcValue": 0.5441158156700598,
+      "lnValue": 6.835312435673951
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": null,
+      "keys": 7,
+      "rcValue": -5.448817237880204,
+      "lnValue": 1.317462032911906
+    },
+    {
+      "pattern": "mixed",
+      "rate": 0.75,
+      "cvtFlag": "IN",
+      "keys": 7,
+      "rcValue": -5.675875539638392,
+      "lnValue": 3.4148152779533736
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": null,
+      "keys": 7,
+      "rcValue": -2.767110391842111,
+      "lnValue": 1.671999304315483
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1,
+      "cvtFlag": "IN",
+      "keys": 7,
+      "rcValue": -3.020152241924568,
+      "lnValue": 4.045812528584597
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": null,
+      "keys": 7,
+      "rcValue": 0.5165915592700606,
+      "lnValue": 2.570101736252017
+    },
+    {
+      "pattern": "mixed",
+      "rate": 1.5,
+      "cvtFlag": "IN",
+      "keys": 7,
+      "rcValue": 0.35218200695431834,
+      "lnValue": 5.418442868349162
+    }
+  ]
+}

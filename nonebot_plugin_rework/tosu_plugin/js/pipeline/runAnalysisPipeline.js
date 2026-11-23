@@ -385,6 +385,13 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
     let fixedDensityValue = Number.NaN;
     let fixedDensityLnValue = Number.NaN;
     let fixedDensityError = null;
+    let fixedDensityRcSequence = null;
+    let fixedDensityLnSequence = null;
+    let fixedDensityRcTicks = [];
+    let fixedDensityLnTicks = [];
+    let fixedDensityRcAnchor = null;
+    let fixedDensityLnAnchor = null;
+    let fixedDensityOverlaps = null;
     if (options.withFixedDensity && supportsFixedDensity) {
         try {
             const fixedDensity = fixedDensityProfileResult
@@ -393,6 +400,13 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
                 });
             fixedDensityValue = fixedDensity.rcValue;
             fixedDensityLnValue = fixedDensity.lnValue;
+            fixedDensityRcSequence = fixedDensity.rcSequence || null;
+            fixedDensityLnSequence = fixedDensity.lnSequence || null;
+            fixedDensityRcTicks = fixedDensity.rcTicks || [];
+            fixedDensityLnTicks = fixedDensity.lnTicks || [];
+            fixedDensityRcAnchor = fixedDensity.rcAnchor || null;
+            fixedDensityLnAnchor = fixedDensity.lnAnchor || null;
+            fixedDensityOverlaps = fixedDensity.overlaps || null;
         } catch (err) {
             fixedDensityError = String(err?.message || err);
         }
@@ -471,6 +485,13 @@ export async function runAnalysisPipeline({ rawText, estimatorAlgorithm, options
         fixedDensityValue,
         fixedDensityLnValue,
         fixedDensityError,
+        fixedDensityRcSequence,
+        fixedDensityLnSequence,
+        fixedDensityRcTicks,
+        fixedDensityLnTicks,
+        fixedDensityRcAnchor,
+        fixedDensityOverlaps,
+        fixedDensityLnAnchor,
         companellaEttResult,
         companellaEttError,
         errors: [],

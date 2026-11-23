@@ -8,10 +8,10 @@ import { OsuFileParser } from "../nonebot_plugin_rework/tosu_plugin/js/parser/os
 import { makeManiaBeatmap } from "./fixtures/maniaBeatmap.mjs";
 
 const { cases } = JSON.parse(await readFile(
-    new URL("./fixtures/fixedDensity-beta_1.0.7.json", import.meta.url), "utf8",
+    new URL("./fixtures/fixedDensity-beta_1.1.3.json", import.meta.url), "utf8",
 ));
 
-test("Fixed Density matches frozen upstream beta_1.0.7 values", () => {
+test("Fixed Density matches frozen upstream beta_1.1.3 values", () => {
     for (const expected of cases) {
         const { pattern, rate, cvtFlag, keys = 4 } = expected;
         const actual = calculateFixedDensity(makeManiaBeatmap({ pattern, keys }), rate, { cvtFlag });
@@ -23,9 +23,9 @@ test("Fixed Density matches frozen upstream beta_1.0.7 values", () => {
 
 test("6K/7K values use upstream dan names for both channels", () => {
     assert.equal(fixedDensityRcLabel(12, 6), "Mystery");
-    assert.equal(fixedDensityLnLabel(12, 6), "Mystery");
+    assert.equal(fixedDensityLnLabel(12, 6), "Celestial");
     assert.equal(fixedDensityRcLabel(12, 7), "Azimuth");
-    assert.equal(fixedDensityLnLabel(12, 7), "Azimuth");
+    assert.equal(fixedDensityLnLabel(12, 7), "Gamma");
 });
 
 test("conversion leaves the shared parser unchanged and exports finite, ordered chart samples", () => {

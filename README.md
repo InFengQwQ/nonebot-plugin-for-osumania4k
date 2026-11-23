@@ -31,10 +31,11 @@ ManiaMapAnalyser 前端插件，无需另外准备 tosu 环境即可独立运行
 分析卡片。4K/6K/7K mania 计算左上角 RC/LN 固定密度值，并显示相应段位标签；
 其他键数继续使用参考插件的 SunnyRework / OsuSR 数值和 Sunny 段位，非 mania 模式显示 `-`。
 
-**算法与曲线**：固定密度算法同步自上游 `cb9b218`（`beta_1.0.7` / RC v13）。4K/6K/7K mania
-使用与上游相同的 RC、LN 独立难度曲线、段位刻度和整谱锚线；LN 事件不足或难度接近零时，
-按上游规则仅显示 RC 图。其他键数的 mania 保留原有 SunnyRework 曲线，其他游戏模式保持原有行为。
-6K/7K 使用上游对应段位刻度与标签；4K/6K/7K 旧图片缓存会自动失效，重新查询即按新算法出图。
+**算法与曲线**：固定密度算法同步自上游 `928549f`（`beta_1.1.3` / v1.2）。4K/6K/7K mania
+使用独立 RC/LN 难度曲线与段位刻度。RC 图下方新增 Jack、Chordstream、Stream 键型区间色带；
+RC/LN 图会标出同轨重叠键和近似重叠键，并按拍号给出位置提示。LN 事件不足或难度接近零时，
+按上游规则仅显示 RC 图。其他键数的 mania 保留 SunnyRework 曲线，非 Fixed Density 模式下的卡片
+水印和 SunnyRework / osu!SR 参考段位估计保持本 fork 的定制行为。
 
 **容错行为**：缺少 `[HitObjects]` 的无效 osu! 文件会替换为错误提示图片；单张渲染失败
 也只会替换那一张，不会中断整包。Malody 转换边界与历史坑见

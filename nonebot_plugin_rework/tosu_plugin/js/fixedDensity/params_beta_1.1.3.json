@@ -1,6 +1,6 @@
 {
  "_comment": "Fixed Density beta_1.0.5.1 参考参数（与 js/fixedDensity/index.js 顶部常量一致；插件代码不读取本文件）。在 beta_1.0.5 基础上增加 6K 手内合并层：6K 每手 3 轨，手内先按 12=(0,1)/(3,4)、23=(1,2)/(4,5) 两组重叠 softmax 配对合并，然后新加一层用 2-范数合并两条配对序列；该层参数（hand_norm_p / hand_norm_scale）是后续 6K 全量调参的专用旋钮，初值 2.0 / 1.0。4K/7K 及其它键数保持 beta_1.0.5 行为。",
- "version": "beta_1.0.7",
+ "version": "beta_1.1.3",
  "rc": {
   "params": {
    "half_life_ms": 306.625,
@@ -233,6 +233,249 @@
     "love_is_war_ln": 9.901,
     "reimei_ln": 23.602,
     "koishi_ln": 13.485
+   }
+  },
+  "ln_map_layer_v17": {
+   "beta": 0.272618,
+   "s0": 7.312076,
+   "c": 0.4711,
+   "knots": [
+    0.1,
+    0.25,
+    0.42,
+    0.6,
+    0.8,
+    1.02,
+    1.28,
+    1.6
+   ],
+   "delta": [
+    12.0,
+    11.999999,
+    -1.272998,
+    -6.551445,
+    2.674733,
+    12.0,
+    12.0,
+    -12.0
+   ],
+   "benchmark": {
+    "4k_ln": 1.3081,
+    "6k_ln": 1.3638,
+    "7k_ln": 1.2976
+   },
+   "dan_ln_display": "value = 段位序号 + 1（Start = 1.0）",
+   "align": {
+    "6k": {
+     "A": 0.7547,
+     "B": 1.05853
+    },
+    "7k": {
+     "A": 0.7547,
+     "B": 1.04338
+    }
+   }
+  },
+  "fork_release_v18": {
+   "gamma_fork": 1.0,
+   "tol_ms": 20.0,
+   "feature": "S_fork = quantile0.75 over LN release events of (1/0.5 * max(w, LN_REL_W_MIN)); fork = middle lane of a >=3-lane hand releases while the two neighbors are still active (hold covering t+-tol or tap within tol)"
+  },
+  "ln_density_anchor_v18": {
+   "lnOcc": 1.0,
+   "scope": "kTotal>=6 only (4K LN 逐位不变)",
+   "formula": "nForLn += lnOcc * occupancy, occupancy = sum(LN 长度)/谱面时间跨度（平均同时保持的 LN 数）",
+   "recenter": {
+    "6k_lnAlignA": 1.5803,
+    "7k_lnAlignA": 1.4954,
+    "note": "抬高 A 抵消占位项带来的整体抬升，使 bias≈0"
+   },
+   "benchmark": {
+    "4K_ln_rmse": 1.3081,
+    "6K_ln_rmse": 1.1006,
+    "7K_ln_rmse": 1.0066,
+    "before": {
+     "4K": 1.3081,
+     "6K": 1.3638,
+     "7K": 1.2976
+    }
+   },
+   "fork_heavy": {
+    "inverse (10)": {
+     "before_err": -3.78,
+     "after_err": -1.9
+    },
+    "inverse (11)": {
+     "before_err": -3.44,
+     "after_err": -1.8
+    }
+   }
+  },
+  "release_layer_v18": {
+   "gamma_rel": 3.0,
+   "scope": "kTotal>=6 only",
+   "feature": "S_rel = share of LN releases where (a) the released hold length >= 400ms and (b) nearest other-lane onset distance > 120ms（孤立释放）; k += γ_rel·S_rel",
+   "recenter": {
+    "6k_lnAlignA": 1.7393,
+    "7k_lnAlignA": 1.7664
+   },
+   "benchmark": {
+    "4K_ln_rmse": 1.3081,
+    "6K_ln_rmse": 1.1022,
+    "7K_ln_rmse": 0.9222,
+    "before_layer": {
+     "6K": 1.1006,
+     "7K": 1.0066
+    }
+   },
+   "evidence": {
+    "7K_nearest_neighbour_error": "与目标谱 nps/meanLen/occupancy 最近的 7K LN 基准谱 expected 0-7，模型残差 −1.7~−2.8",
+    "ols_R2": {
+     "6K": 0.243,
+     "7K": 0.36
+    },
+    "target_ln": {
+     "before_1102": 1.55,
+     "after_density": 1.78,
+     "after_release": 2.11
+    }
+   }
+  },
+  "unified_local_anchor": {
+   "formula": "u = ln(1 + LN_B*k*(wg*n_rc + wo*occupancy + wl*n_local)); n_local = LN 事件 ±500ms 内音符密度(notes/s)，只在 LN 位置采样，非 LN 段的 RC/音符变化不进入该项",
+   "weights": {
+    "4K": {
+     "wg": 0.75,
+     "wo": 0.5,
+     "wl": 0.25
+    },
+    "6K": {
+     "wg": 0.75,
+     "wo": 2.0,
+     "wl": 0.25
+    },
+    "7K": {
+     "wg": 0.25,
+     "wo": 1.0,
+     "wl": 0.5
+    }
+   },
+   "ln_map_v18": {
+    "BETA": 0.275592,
+    "S0": 7.7858,
+    "C": 0.427591,
+    "DELTA": [
+     -15.0,
+     -11.768065,
+     15.0,
+     3.671901,
+     15.0,
+     15.0,
+     15.0,
+     -15.0
+    ],
+    "KNOTS": [
+     0.1,
+     0.25,
+     0.42,
+     0.6,
+     0.8,
+     1.02,
+     1.28,
+     1.6
+    ]
+   },
+   "align": {
+    "6K": {
+     "lnAlignA": 2.0611,
+     "lnAlignB": 1.098482
+    },
+    "7K": {
+     "lnAlignA": 0.904807,
+     "lnAlignB": 0.968597
+    }
+   },
+   "benchmark": {
+    "4K_ln_rmse": 1.3035,
+    "6K_ln_rmse": 1.039,
+    "7K_ln_rmse": 0.9547,
+    "before": {
+     "4K": 1.3081,
+     "6K": 1.1022,
+     "7K": 0.9222
+    }
+   },
+   "gap_injection_dLn": {
+    "before": {
+     "4K": 0.052,
+     "6K": 0.708,
+     "7K": 0.341
+    },
+    "after": {
+     "4K": 0.052,
+     "6K": 0.484,
+     "7K": 0.126
+    }
+   },
+   "target_chart_ln": 2.725,
+   "deployed": false
+  },
+  "ln_floor_0": {
+   "rule": "lnValue = max(0, align(lnRawValue) + lnShift)；align 不再在中间截 0",
+   "effect": "0% LN 谱为 0.00；Start/reg0 = 1.00；低于 Start 的谱可取 0~1",
+   "verified": {
+    "6k_1st_jack_ln": 0.0,
+    "7k_10th_ln": 0.331,
+    "benchmark_unchanged": true
+   }
+  },
+  "shield_layer_v23": {
+   "description": "LN×RC 交集（盾键）实验层：S_shield = 带相邻轨单点的长条（按 w 加权）占比，k += γ_shield·S_shield；另加 LN 锚常数项 b（u=ln(1+LN_B·(k·n+b))）",
+   "constants": {
+    "LN_SHIELD_TOL_MS": 20.0,
+    "LN_SHIELD_W": {
+     "4": 0.0,
+     "6": 0.0,
+     "7": 0.0
+    },
+    "LN_ADD_B": {
+     "4": 0.0,
+     "6": 0.0,
+     "7": 0.0
+    }
+   },
+   "calibration": {
+    "4K_LN": {
+     "baseline_rmse": 1.3035,
+     "gamma6_map_refit": 1.284,
+     "note": "需重拟合共享 LN 映射层"
+    },
+    "6K_LN": {
+     "baseline_rmse": 1.039,
+     "gamma2_AB_refit": 1.0337
+    },
+    "7K_LN": {
+     "baseline_rmse": 0.9547,
+     "gamma1": 0.9569,
+     "gamma2": 0.9597,
+     "note": "γ>0 变差"
+    },
+    "kn_b": {
+     "7K_joint_refit_b20": 0.9508,
+     "7K_joint_refit_b40": 0.9524,
+     "note": "联合重标定后无收益；目标谱仍 2.7"
+    }
+   },
+   "deployed": false,
+   "target_case": {
+    "chart": "1778677920[mania].osu",
+    "rc": -3.03,
+    "ln": 2.72,
+    "expected_display": 6.3,
+    "k": 3.33,
+    "n": 6.43,
+    "occupancy": 3.45,
+    "n_for_exp6_to8_median_7K": 80.6
    }
   }
  },
@@ -919,6 +1162,463 @@
     "7k": "unchanged (layer is 4K-only)"
    },
    "knobs": "v11Cfg reads rotLo/rotHi/rotDelta/rotReach from globalThis.__V11 for sweeps"
+  },
+  "hollow_layer_4k_v14": {
+   "desc": "4K 叠内挖空（抬指）修正：相邻行押数在 4<->3 间持续交替时按 exp(delta*sRate*sAlt*sChord) 抬升行值",
+   "RC_HOLLOW_LO_RPS": 5.0,
+   "RC_HOLLOW_HI_RPS": 9.0,
+   "RC_HOLLOW_DELTA": 0.15,
+   "RC_HOLLOW_WIN": 4,
+   "RC_HOLLOW_REACH_MS": 160.0,
+   "calibration": "合成 blocks(4343) 挖空段 vs 平拍段：-0.37~-0.73 -> +0.1~+0.3；用户谱 ABAB 8th Dan 4343 段峰值 15.82->16.37，四押平拍段 16.23 不变",
+   "benchmark_4k_rc_rmse": {
+    "before": 0.4377,
+    "after": 0.4406,
+    "bias_after": -0.038
+   }
+  },
+  "hand_merge_v15": {
+   "desc": "手内 band 合并：6K 双手/7K 右手由 2-范数 (Σb²)^½ 改为 band 数中性的算术平均 Σb/n",
+   "HAND_MERGE_MODE": "mean",
+   "HAND_MERGE_SCALE": 1.0,
+   "HAND_NORM_P_deprecated": 2.0,
+   "LN_anchor": "6K/7K 的 LN 密度仍用旧 2-范数合并的序列计算（nForLn 与 lnDensity），4K/6K LN 逐位不变",
+   "handMateOf_fix": "偶数轨手（7K 右手 4 轨）rank^1 配对邻居；旧实现 rank2 -> hand[len-2] === 自己"
+  },
+  "map_v15_6k7k": {
+   "MAP6_COEF": [
+    2.20588120362346,
+    0.15950080085734,
+    0.41564051395512,
+    0.04,
+    0.10333782155898,
+    0.08886105558633,
+    -0.039566345789796765
+   ],
+   "MAP7_COEF": [
+    2.18852201707523,
+    0.27005474926512,
+    0.04,
+    0.04,
+    0.1168465747314,
+    -0.039566345789796765
+   ],
+   "alignX_6k": [
+    0.129905,
+    1.086449,
+    1.899298,
+    3.127418,
+    3.895948,
+    4.948346,
+    6.228015,
+    6.880386,
+    8.025819,
+    8.924297,
+    9.957004
+   ],
+   "alignX_7k": [
+    0.108701,
+    0.885972,
+    2.311825,
+    3.344272,
+    3.87471,
+    5.35501,
+    6.492257,
+    6.833979,
+    8.124428,
+    8.399177,
+    8.952413,
+    10.84028,
+    11.668369,
+    13.29793,
+    14.487911
+   ],
+   "benchmark": {
+    "6K_rc": {
+     "before": 0.4343,
+     "after": 0.3056,
+     "le1": 1.0
+    },
+    "7K_rc": {
+     "before": 0.8851,
+     "after": 0.8094,
+     "le1": 0.767
+    },
+    "6K_ln": {
+     "before": 1.4025,
+     "after": 1.4025
+    },
+    "7K_ln": {
+     "before": 1.4239,
+     "after": 1.413
+    }
+   }
+  },
+  "hollow_continuous_v16": {
+   "layer": "RC v16 叠内挖空/换指（连续量，4K/6K/7K 通用）",
+   "measure": "d_k = |A_{k-1} symdiff A_k| / kTotal；bal = 固定缺轨 1、轮换缺轨 1-balMix",
+   "constants": {
+    "delta": 0.291,
+    "lo_rps": 5.0568,
+    "hi_rps": 9.18,
+    "down_lo_rps": 11.76,
+    "down_hi_rps": 16.8642,
+    "fill_lo": 0.561,
+    "fill_hi": 1.0,
+    "alt_lo": 0.95,
+    "alt_hi": 1.0,
+    "bal_mix": 1.0,
+    "bal_lo_rps": 11.0,
+    "bal_hi_rps": 15.0,
+    "bal_gain": 3.0,
+    "reach_ms": 47.0755,
+    "win": 4
+   },
+   "calibration": {
+    "method": "参数 → 重拟合 4K MAP_COEF → 参数 …（交替；每步在 value 空间最小二乘重拟合映射层）",
+    "script": "_analysis/calib_hollow_opt.py + _analysis/calib_hollow_server.mjs（6 分片并行）",
+    "subset": 200,
+    "subset_rmse_before": 0.46083,
+    "subset_rmse_after": 0.42405,
+    "full_rmse_before_layer": 0.4377,
+    "full_rmse_after": 0.4365,
+    "full_rmse_hand_set_constants": 0.4836,
+    "map_coef": [
+     2.044804,
+     0.04,
+     0.389044,
+     0.320882,
+     0.327904,
+     0.04,
+     0.04,
+     0.082575,
+     0.04,
+     0.144641,
+     0.279896,
+     0.135792,
+     -0.039566345789796765
+    ]
+   },
+   "cases_4k_section_gap": {
+    "4343_fixed": [
+     0.44,
+     0.39,
+     0.02
+    ],
+    "4343_rot": [
+     0.0,
+     -0.1,
+     0.0
+    ],
+    "4242_fixed": [
+     0.84,
+     0.7,
+     0.15
+    ],
+    "4242_rot": [
+     0.06,
+     -0.24,
+     -0.47
+    ],
+    "3333": [
+     0.43,
+     0.24,
+     0.15
+    ]
+   },
+   "benchmark": {
+    "4k_rc": 0.4365,
+    "6k_rc": 0.3056,
+    "7k_rc": 0.8095
+   }
+  },
+  "map_v17_6k7k": {
+   "6k": {
+    "layout": "K4x",
+    "knots": [
+     [
+      1.3,
+      0.9
+     ],
+     [
+      3.0,
+      0.9
+     ],
+     [
+      4.8,
+      0.9
+     ],
+     [
+      6.8,
+      0.9
+     ]
+    ],
+    "coef": [
+     2.20586,
+     0.15943,
+     0.41575,
+     0.04,
+     0.10327,
+     0.08891,
+     -0.039566345789796765
+    ],
+    "rmse": 0.3056
+   },
+   "7k": {
+    "layout": "K5",
+    "knots": [
+     [
+      1.8,
+      0.6
+     ],
+     [
+      2.8,
+      0.6
+     ],
+     [
+      3.8,
+      0.6
+     ],
+     [
+      4.8,
+      0.6
+     ],
+     [
+      5.8,
+      0.6
+     ]
+    ],
+    "coef": [
+     2.18397,
+     0.27576,
+     0.04,
+     0.18527,
+     0.0734,
+     0.04,
+     0.11959,
+     -0.039566345789796765
+    ],
+    "rmse": 0.8053
+   }
+  },
+  "unified_map_v19": {
+   "formula": "value = scale_K * S(a_K*g + b_K)",
+   "knots": [
+    2.2101278976392855,
+    3.699978501121243,
+    5.209361865177508,
+    5.9962723865483465,
+    6.591666900734373,
+    7.196080420481992,
+    7.7937799400531995,
+    8.217424417701876,
+    9.036267419464474,
+    9.480012866934706,
+    10.078770725761455,
+    10.752940940960519
+   ],
+   "heights": [
+    -0.8794366811796334,
+    -0.013736313212641793,
+    1.0087052139108863,
+    2.1618698977817616,
+    3.2488449025505255,
+    4.412165308853295,
+    5.785969951035388,
+    7.440075358325172,
+    10.343690654991752,
+    11.29455103538796,
+    12.190155501765599,
+    13.466384424339552
+   ],
+   "per_key": {
+    "4": {
+     "a": 2.5616543851919005,
+     "b": -1.2792532506822125,
+     "scale": 1.226591659453079
+    },
+    "6": {
+     "a": 1.9751372868481356,
+     "b": -0.6842399511568765,
+     "scale": 3.084478818837208
+    },
+    "7": {
+     "a": 3.5548645213669943,
+     "b": -3.334187104795253,
+     "scale": 1.0036274999572201
+    },
+    "1": {
+     "a": 0.8840562274122081,
+     "b": 3.6006118841092496,
+     "scale": 1.0309198578160492,
+     "rmse": 3.5598838347462567,
+     "bias": 0.04202742624266499,
+     "n": 60
+    },
+    "2": {
+     "a": 1.2975844626089315,
+     "b": 1.2531898276365778,
+     "scale": 1.349976467974019,
+     "rmse": 3.1647832884604967,
+     "bias": -0.0026013725166151563,
+     "n": 60
+    },
+    "3": {
+     "a": 1.3417351479822974,
+     "b": 1.0919608792080828,
+     "scale": 1.3312319612732961,
+     "rmse": 3.099272327248832,
+     "bias": -0.017744212667565793,
+     "n": 60
+    },
+    "5": {
+     "a": 1.6634211397403125,
+     "b": 0.9799792469986066,
+     "scale": 1.0789053659728125,
+     "rmse": 2.791145550398168,
+     "bias": 0.016904127092454337,
+     "n": 60
+    },
+    "8": {
+     "a": 2.0320047171877325,
+     "b": 1.196105335785484,
+     "scale": 1.1448150662216638,
+     "rmse": 2.162125340211347,
+     "bias": 0.01404688337789639,
+     "n": 60
+    },
+    "9": {
+     "a": 2.19888141656044,
+     "b": 1.6417381601057919,
+     "scale": 0.8782774794622709,
+     "rmse": 2.929128247276775,
+     "bias": -0.014239982867680941,
+     "n": 60
+    },
+    "10": {
+     "a": 2.3536777997371083,
+     "b": 1.4134614459161252,
+     "scale": 0.9216182663663292,
+     "rmse": 2.569255534129588,
+     "bias": 0.0013289765870882597,
+     "n": 60
+    }
+   },
+   "benchmark": {
+    "4K_rmse": 0.4314,
+    "6K_rmse": 0.3018,
+    "7K_rmse": 0.8009
+   },
+   "regression_242": {
+    "non_ln_max_drc": 0.134,
+    "max_dln": 0.0
+   },
+   "ln_benchmark": {
+    "4K": 1.303,
+    "6K": 1.039,
+    "7K": 0.955
+   },
+   "port_calibration_rmse": {
+    "1": 3.5598838347462567,
+    "2": 3.1647832884604967,
+    "3": 3.099272327248832,
+    "5": 2.791145550398168,
+    "8": 2.162125340211347,
+    "9": 2.929128247276775,
+    "10": 2.569255534129588
+   },
+   "deployed": false,
+   "scripts": [
+    "_analysis/_unified_monotone_clean.py",
+    "_analysis/_port_calib6.mjs",
+    "_analysis/_fit_port_keys.py",
+    "_analysis/_verify_port_keys.mjs"
+   ],
+   "low_key_extension": {
+    "keys": [
+     1,
+     2,
+     3
+    ],
+    "note": "single-lane hands fall back to their own decay sequence; params by content-port fit",
+    "port_rmse": {
+     "1": 3.5598838347462567,
+     "2": 3.1647832884604967,
+     "3": 3.099272327248832
+    }
+   }
+  },
+  "chord_removed_v20": {
+   "removed": [
+    "gPred 的 -E*chord 项",
+    "rcValueConst 的 E*chord 项",
+    "mergeDecaySequences 的 V11_CHORD*log2(c) 行乘子",
+    "FIT_E_CHORD / V11_CHORD 常量"
+   ],
+   "reason": "chord = noteCount/onsetCount 与逐行 log2(c) 都是离散跳变量（c:1→2）；当前 E=0、V11_CHORD=0 本身不参与运算，删除为消除隐患",
+   "equivalence": "benchmark 完全一致：4K RC 0.4314 / 4K LN 1.303 / 6K LN 1.039 / 7K LN 0.955"
+  },
+  "row_rate_layer_v21": {
+   "formula": "gPred += ROW_RATE_BETA[k] * ln(rowsPerSec / 8)",
+   "row_rate": "连续有效行数：N_eff = Σ 1/(1 + Σ exp(−Δt²/(2σ²)))，σ = 12ms；rowsPerSec = (N_eff − 1)/跨度",
+   "beta": {
+    "4": 0.051,
+    "6": 0.048,
+    "7": 0.273
+   },
+   "calibration": "联合拟合共享形状 S + 每键 (a,b,scale)，β 网格 3×3×3 最优"
+  },
+  "full_calibration_v21": {
+   "merge": {
+    "mode": "prodadd",
+    "lambda": {
+     "6": 0.0,
+     "7": 0.35
+    },
+    "chord_alt": 0.22,
+    "chord_alt_weights": {
+     "dSize>=3": 1.0,
+     "dSize=2": 0.8
+    },
+    "chord_alt_fade": "1 − smoothstep((handRps − 8)/12)，仅 kTotal ≥ 7"
+   },
+   "umap": {
+    "perKey": {
+     "4K": {
+      "a": 2.550526,
+      "b": -1.235473,
+      "scale": 1.228717
+     },
+     "6K": {
+      "a": 1.966016,
+      "b": -0.859469,
+      "scale": 3.529732
+     },
+     "7K": {
+      "a": 3.560026,
+      "b": -4.13158,
+      "scale": 0.939876
+     }
+    }
+   },
+   "benchmark": {
+    "4k_rc": 0.42,
+    "6k_rc": 0.2994,
+    "7k_rc": 0.6253,
+    "4k_ln": 1.303,
+    "6k_ln": 1.039,
+    "7k_ln": 0.955
+   },
+   "notes": "4K/6K/7K RC 全部重标定；LN 未改动；qqbot layout 65。"
+  },
+  "overlap_layer_v22": {
+   "overflow": "removed",
+   "rule": "同一轨、同一时间戳（浮点精确相等）的多个物件按 1 个物件计入 contribution 与 noteCount；不再使用 OVERLAP_PENALTY 超限替代。",
+   "detection": "仅 float 精确相等视为重叠；相隔 1ms 的不同时间戳不算重叠。",
+   "chart_markers": "RC 图：单点叠放与“单点压在 LN 下”各画 1 根红线；LN 图：LN 与 LN 叠放画 1 根红线；n 个物件叠放 = n-1 根。",
+   "note_text": "存在{n}处重叠键，请检查谱面",
+   "axis": "RC/LN 两张图共用同一时间窗口（序列首尾并集），横轴一一对应。",
+   "benchmark": "972 张基准谱零重叠、数值逐位不变（4K RC 0.4200 / 6K 0.2994 / 7K 0.6253）。"
   }
  }
 }
