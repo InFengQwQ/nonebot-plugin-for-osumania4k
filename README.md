@@ -16,7 +16,7 @@ ManiaMapAnalyser 前端插件，无需另外准备 tosu 环境即可独立运行
 | --- | --- |
 | `/rework2 <谱面ID>` | 分析单张谱面，返回一张卡片图片 |
 | `/rework2 bid<谱面ID>` / `b<ID>` | 同上（`bid`、`b` 与数字之间可省略空格，写 `bid 123` 亦可） |
-| `/rework2 sid<谱包ID>` / `s<ID>` | 分析整个谱包，以**合并转发（聊天记录）**形式发送多张图片 |
+| `/rework2 sid<谱包ID>` / `s<ID>` | 分析整个谱包；两张结果分开发图，三张结果以合并转发（聊天记录）发送 |
 | `/rework2 <osu! 链接>` | 支持 `osu.ppy.sh/beatmapsets/...`、`/beatmaps/...`、`/b/...`、`/s/...` |
 | 回复谱面文件并发送 `/rework2` | 支持 `.osu` / `.osz` / `.mc` / `.mcz`，以及任意 `.zip`（可嵌套） |
 
@@ -162,9 +162,8 @@ COMMAND_START=["/"]
 | `REWORK_TEMP_DIR` | 空 | 临时图片目录；留空为 `<数据目录>/temp` |
 | `REWORK_KEEP_FILES` | `false` | 是否把生成图片落到临时目录 |
 | `REWORK_CACHE_ENABLED` | `true` | 是否启用内容哈希缓存 |
-| `REWORK_SEND_AS_FORWARD` | `true` | 多张谱面时是否使用合并转发 |
-| `REWORK_FORWARD_NAME` | `Rework 谱面分析` | 合并转发标题 |
-| `REWORK_FORWARD_UIN` | `10000` | 合并转发节点显示的 QQ 号 |
+| `REWORK_SEND_AS_FORWARD` | `true` | 三张结果固定使用合并转发，其他多张结果是否使用合并转发 |
+| `REWORK_FORWARD_NAME` | `Rework 谱面分析` | 触发者昵称缺失时的转发节点昵称 |
 | `REWORK_ALLOW_GROUP` | `true` | 是否允许群聊触发 |
 | `REWORK_ALLOW_PRIVATE` | `true` | 是否允许私聊触发 |
 | `REWORK_GROUP_ALLOWLIST` | `[]` | 群白名单，留空不限制 |

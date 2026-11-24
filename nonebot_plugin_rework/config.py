@@ -47,7 +47,6 @@ class Config(BaseModel):
     # 发送
     rework_send_as_forward: bool = True
     rework_forward_name: str = "Rework 谱面分析"
-    rework_forward_uin: str = "10000"
 
     # 访问控制
     rework_allow_group: bool = True
@@ -84,7 +83,6 @@ class OutputConfig:
     keep_files: bool = False
     send_as_forward: bool = True
     forward_name: str = "Rework 谱面分析"
-    forward_uin: str = "10000"
 
 
 @dataclass
@@ -156,7 +154,6 @@ def build_runtime_config(config: Config) -> AppConfig:
             keep_files=bool(config.rework_keep_files),
             send_as_forward=bool(config.rework_send_as_forward),
             forward_name=config.rework_forward_name,
-            forward_uin=str(config.rework_forward_uin),
         ),
         access=AccessConfig(
             allow_group=bool(config.rework_allow_group),
