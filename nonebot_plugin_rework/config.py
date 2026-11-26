@@ -30,9 +30,9 @@ class Config(BaseModel):
     rework_page_timeout_ms: int = 180000
     rework_settle_ms: int = 1500
 
-    # 谱面来源
-    rework_beatmap_url: str = "https://osu.direct/api/osu/{id}"
-    rework_beatmapset_url: str = "https://osu.direct/api/d/{id}"
+    # 谱面来源；空格或逗号分隔多个镜像，按顺序尝试
+    rework_beatmap_url: str = "https://osu.ppy.sh/osu/{id}"
+    rework_beatmapset_url: str = "https://osu.direct/api/d/{id} https://dl.sayobot.cn/beatmaps/download/novideo/{id}"
     rework_user_agent: str = "nonebot-plugin-rework/1.0"
     rework_http_timeout_sec: float = 60.0
     rework_max_beatmaps_per_pack: int = 40
@@ -69,8 +69,8 @@ class RenderConfig:
 
 @dataclass
 class OsuConfig:
-    beatmap_url: str = "https://osu.direct/api/osu/{id}"
-    beatmapset_url: str = "https://osu.direct/api/d/{id}"
+    beatmap_url: str = "https://osu.ppy.sh/osu/{id}"
+    beatmapset_url: str = "https://osu.direct/api/d/{id} https://dl.sayobot.cn/beatmaps/download/novideo/{id}"
     user_agent: str = "nonebot-plugin-rework/1.0"
     timeout_sec: float = 60.0
     max_beatmaps_per_pack: int = 40

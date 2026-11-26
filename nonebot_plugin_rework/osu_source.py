@@ -59,6 +59,11 @@ def parse_osu_url(url: str) -> tuple[str, int] | None:
     return None
 
 
+def _url_templates(template: str) -> list[str]:
+    """一个配置项可以写多个源，按顺序尝试。"""
+    return [part for part in template.replace(",", " ").split() if part]
+
+
 async def _get_bytes(
     session: aiohttp.ClientSession,
     url: str,
@@ -100,30 +105,48 @@ async def fetch_beatmap(
     session: aiohttp.ClientSession, cfg: OsuConfig, beatmap_id: int
 ) -> BeatmapFile:
     """按谱面 ID 拉取单个 .osu。"""
-    url = cfg.beatmap_url.format(id=beatmap_id)
-    logger.info("  下载 .osu：%s", url)
-    data = await _get_bytes(session, url, cfg)
-    text = decode_osu_text(data)
-    _validate_osu_text(text)
-    logger.info("  .osu 下载完成：%.1f KB", len(data) / 1024)
-    return BeatmapFile(filename=f"{beatmap_id}.osu", text=text)
+    last: OsuSourceError | None = None
+    for template in _url_templates(cfg.beatmap_url):
+        url = template.format(id=beatmap_id)
+        logger.info("  下载 .osu：%s", url)
+        try:
+            data = await _get_bytes(session, url, cfg)
+        except OsuSourceError as exc:
+            last = exc
+            logger.warning("  源不可用，换下一个：%s", exc)
+            continue
+        text = decode_osu_text(data)
+        _validate_osu_text(text)
+        logger.info("  .osu 下载完成：%.1f KB", len(data) / 1024)
+        return BeatmapFile(filename=f"{beatmap_id}.osu", text=text)
+    raise last or OsuSourceError("没有配置谱面源。")
 
 
 async def fetch_beatmapset(
     session: aiohttp.ClientSession, cfg: OsuConfig, set_id: int
 ) -> list[BeatmapFile]:
     """按谱包 ID 下载 .osz 并解包出全部 .osu。"""
-    url = cfg.beatmapset_url.format(id=set_id)
-    logger.info("  下载 .osz：%s", url)
-    data = await _get_bytes(session, url, cfg)
-    if data[:2] != b"PK":
-        raise OsuSourceError("镜像站返回的不是 .osz 压缩包（可能被限流或 ID 不存在）。")
-    logger.info("  .osz 下载完成：%.1f KB，正在解包…", len(data) / 1024)
-    from . import archive  # 局部导入避免循环依赖
+    last: OsuSourceError | None = None
+    for template in _url_templates(cfg.beatmapset_url):
+        url = template.format(id=set_id)
+        logger.info("  下载 .osz：%s", url)
+        try:
+            data = await _get_bytes(session, url, cfg)
+        except OsuSourceError as exc:
+            last = exc
+            logger.warning("  源不可用，换下一个：%s", exc)
+            continue
+        if data[:2] != b"PK":
+            last = OsuSourceError(f"镜像站返回的不是 .osz 压缩包：{url}")
+            logger.warning("  %s", last)
+            continue
+        logger.info("  .osz 下载完成：%.1f KB，正在解包…", len(data) / 1024)
+        from . import archive  # 局部导入避免循环依赖
 
-    beatmaps = archive.collect_from_zip(data, f"set_{set_id}.osz")
-    logger.info("  解包完成：%d 张谱面", len(beatmaps))
-    return beatmaps
+        beatmaps = archive.collect_from_zip(data, f"set_{set_id}.osz")
+        logger.info("  解包完成：%d 张谱面", len(beatmaps))
+        return beatmaps
+    raise last or OsuSourceError("没有配置谱面源。")
 
 
 def read_local_beatmap(path: str | Path) -> list[BeatmapFile]:
