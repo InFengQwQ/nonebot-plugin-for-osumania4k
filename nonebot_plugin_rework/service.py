@@ -42,6 +42,14 @@ _KIND_ALIASES = {
     "s": "set", "sid": "set", "set": "set", "setid": "set",
 }
 _request_seq = itertools.count(1)
+_PARALLEL_CHUNKS = 4
+_PARALLEL_MIN_BYTES = 1 << 20
+_RANGE_ATTEMPTS = 3
+
+
+def _content_range_total(value: str) -> int:
+    _, _, size = value.rpartition("/")
+    return int(size) if size.isdigit() else 0
 
 
 @dataclass
@@ -400,10 +408,55 @@ class ReworkService:
             return await asyncio.to_thread(Path(url2pathname(raw_path)).read_bytes)
         assert self._session is not None
         timeout = aiohttp.ClientTimeout(total=self.cfg.osu.timeout_sec)
-        async with self._session.get(url, timeout=timeout) as resp:
-            if resp.status != 200:
+        async with self._session.get(
+            url, headers={"Range": "bytes=0-0"}, timeout=timeout
+        ) as resp:
+            if resp.status == 200:
+                return await resp.read()
+            if resp.status != 206:
                 raise OsuSourceError(f"下载附件失败（HTTP {resp.status}）。")
-            return await resp.read()
+            total = _content_range_total(resp.headers.get("Content-Range", ""))
+        if total <= _PARALLEL_MIN_BYTES:
+            async with self._session.get(url, timeout=timeout) as resp:
+                if resp.status != 200:
+                    raise OsuSourceError(f"下载附件失败（HTTP {resp.status}）。")
+                return await resp.read()
+        # One stream collapses on a lossy long-RTT path; split the file instead.
+        step = -(-total // _PARALLEL_CHUNKS)
+        parts = await asyncio.gather(
+            *(
+                self._download_range(url, start, min(start + step, total) - 1, timeout)
+                for start in range(0, total, step)
+            )
+        )
+        data = b"".join(parts)
+        if len(data) != total:
+            raise OsuSourceError(f"附件长度不符：{len(data)}/{total} 字节。")
+        return data
+
+    async def _download_range(
+        self, url: str, start: int, end: int, timeout: aiohttp.ClientTimeout
+    ) -> bytes:
+        assert self._session is not None
+        data = bytearray()
+        for _ in range(_RANGE_ATTEMPTS):
+            offset = start + len(data)
+            if offset > end:
+                break
+            headers = {"Range": f"bytes={offset}-{end}"}
+            try:
+                async with self._session.get(
+                    url, headers=headers, timeout=timeout
+                ) as resp:
+                    if resp.status != 206:
+                        raise OsuSourceError(f"分段 {start}-{end} 返回 {resp.status}。")
+                    async for chunk in resp.content.iter_any():
+                        data += chunk
+            except (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError):
+                continue
+        if len(data) != end - start + 1:
+            raise OsuSourceError(f"分段 {start}-{end} 只取到 {len(data)} 字节。")
+        return bytes(data)
 
     # ------------------------------------------------------------------ 渲染与发送
     async def _render_and_send(
